@@ -23,6 +23,7 @@ All features here will be integrated into the data curation tool.
 - options to select multiple models to run at the same time over the same specified data
 - options combine results with models selected
 - options to run [classification, grad_cam visualization] tasks
+- supports gpu & cpu run options; all compute options can be enabled in batch mode for higher efficiency (using a forkjoin pool & a thread-safe img queue)
 
 ### Features to be implemented:
 
