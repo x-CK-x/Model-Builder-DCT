@@ -5,6 +5,10 @@ All features here will be integrated into the data curation tool.
 
 ![](https://github.com/x-CK-x/Model-Builder-DCT/blob/936dd6d88d2a7e373c4bdd831e6466936872e0ac/GUI_imgs/version_1_gui.png)
 
+## Prerequisites:
+
+- https://www.anaconda.com/docs/getting-started/miniconda/install
+
 ## Run Instructions:
 
 1) Download the repository
