@@ -1,0 +1,22 @@
+{
+  "pilot2": {
+    "repo": "RedRocket/JointTaggerProject",
+    "subfolder": "JTP_PILOT2",
+    "filename": "JTP_PILOT2-e3-vit_so400m_patch14_siglip_384.safetensors",
+    "timm_id": "vit_so400m_patch14_siglip_384.webli",
+    "num_classes": 9083,
+    "tags_file": "tagger_tags.json",
+    "head_type": "gated",
+    "supports_cam": true
+  },
+  "pilot1": {
+    "repo": "RedRocket/JointTaggerProject",
+    "subfolder": "JTP_PILOT",
+    "filename": "JTP_PILOT-e4-vit_so400m_patch14_siglip_384.safetensors",
+    "timm_id": "vit_so400m_patch14_siglip_384.webli",
+    "num_classes": 9083,
+    "tags_file": "tagger_tags.json",
+    "head_type": "linear",
+    "supports_cam": true
+  }
+}
