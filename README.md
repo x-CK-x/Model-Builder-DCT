@@ -27,14 +27,17 @@ All features here will be integrated into the data curation tool.
 
 ### Features to be implemented:
 
+| Status | Task Description | Priority Order |
+|---|---|---|
+| [ ] | Automatic installation of miniconda (package-manager) for the user, built into the batch script; 1-time install | 1 |
+| [ ] | Linux/MacOS support; as a shell script | 2 |
+
 - new model list **[TBD]**
 - new UI features **[TBD]**
 - new custom gradio components **[TBD]**
 - new data management features **[TBD]**
 - new data analysis tools **[TBD]**
 - new manual & automatic data augmentation & data pipeline features **[TBD]**
-- Linux/MacOS support
-- automatic installation of miniconda for the user
 
 Credits for model development:
 - https://huggingface.co/RedRocket/JointTaggerProject
