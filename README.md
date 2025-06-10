@@ -34,6 +34,7 @@ All features here will be integrated into the data curation tool.
 - new data analysis tools **[TBD]**
 - new manual & automatic data augmentation & data pipeline features **[TBD]**
 - Linux/MacOS support
+- automatic installation of miniconda for the user
 
 Credits for model development:
 - https://huggingface.co/RedRocket/JointTaggerProject
