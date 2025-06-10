@@ -1,7 +1,9 @@
 # Data Curation Tool - Model Builder
 
 This Tool is intended to be a placeholder for all bottom-up design to prototype & test new features for the FULL [Dataset Curation Tool](https://github.com/x-CK-x/Dataset-Curation-Tool).
-All features here will be integrated into the data curation tool. 
+All features here will be integrated into the data curation tool.
+
+![](https://github.com/x-CK-x/Model-Builder-DCT/blob/936dd6d88d2a7e373c4bdd831e6466936872e0ac/GUI_imgs/version_1_gui.png)
 
 ## Run Instructions:
 
