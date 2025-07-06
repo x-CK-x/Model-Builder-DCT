@@ -30,7 +30,7 @@ All features here will be integrated into the data curation tool.
 | Status | Task Description | Priority Order |
 |---|---|---|
 | [ ] | Automatic installation of miniconda (package-manager) for the user, built into the batch script; 1-time install | 1 |
-| [ ] | Linux/MacOS support; as a shell script | 2 |
+| [X] | Linux/MacOS support; as a shell script | 2 |
 
 - new model list **[TBD]**
 - new UI features **[TBD]**
