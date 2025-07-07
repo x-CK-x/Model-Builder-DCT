@@ -1,9 +1,12 @@
 name: jointagger
 channels:
   - conda-forge
+  - pytorch
 dependencies:
   - python=3.11.9
   - pytorch-gpu=2.7              # pulls torch + torchvision + CUDA libs
+  - torchvision=0.20.*
+  - torchaudio=2.7.*
   - timm
   - safetensors
   - msgspec
@@ -12,8 +15,11 @@ dependencies:
 
   - pip
   - pip:
-      - gradio
+      - gradio>=4.24
       - huggingface_hub
+      - transformers==4.51.0
+      - accelerate
+      - sentencepiece
   # ↓ anything else that has Conda builds ↓
   # - opencv
   # - ...

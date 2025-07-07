@@ -21,6 +21,11 @@ from torchvision.transforms import transforms, InterpolationMode
 import torchvision.transforms.functional as TF
 import timm, safetensors.torch, gradio as gr
 from huggingface_hub import hf_hub_download
+from transformers import (
+    LlavaForConditionalGeneration,
+    TextIteratorStreamer,
+    AutoProcessor,
+)
 import json, math
 import numpy as np
 from collections import defaultdict
@@ -59,6 +64,142 @@ class GatedHead(torch.nn.Module):
         return self.act(x[:, : self.c]) * self.gate(x[:, self.c:])
 
 _model_cache: Dict[str, timm.models.VisionTransformer] = {}
+
+# ────────────── Caption model setup ──────────────
+CAPTION_REPO = "fancyfeast/llama-joycaption-beta-one-hf-llava"
+CAPTION_CACHE = Path.home() / ".cache" / "joycaption"
+CAPTION_CACHE.mkdir(parents=True, exist_ok=True)
+
+_caption_cache: dict[str, LlavaForConditionalGeneration] = {}
+
+def load_caption_model(device: torch.device) -> LlavaForConditionalGeneration:
+    key = str(device)
+    if key in _caption_cache:
+        return _caption_cache[key]
+    processor = AutoProcessor.from_pretrained(CAPTION_REPO, cache_dir=CAPTION_CACHE)
+    model = LlavaForConditionalGeneration.from_pretrained(
+        CAPTION_REPO,
+        torch_dtype=torch.bfloat16,
+        device_map={"": device.index if device.type == "cuda" else "cpu"},
+        cache_dir=CAPTION_CACHE,
+    )
+    model.processor = processor
+    model.eval()
+    _caption_cache[key] = model
+    return model
+
+CAPTION_TYPE_MAP = {
+    "Descriptive": [
+        "Write a detailed description for this image.",
+        "Write a detailed description for this image in {word_count} words or less.",
+        "Write a {length} detailed description for this image.",
+    ],
+    "Descriptive (Casual)": [
+        "Write a descriptive caption for this image in a casual tone.",
+        "Write a descriptive caption for this image in a casual tone within {word_count} words.",
+        "Write a {length} descriptive caption for this image in a casual tone.",
+    ],
+    "Straightforward": [
+        "Write a straightforward caption for this image. Begin with the main subject and medium. Mention pivotal elements—people, objects, scenery—using confident, definite language. Focus on concrete details like color, shape, texture, and spatial relationships. Show how elements interact. Omit mood and speculative wording. If text is present, quote it exactly. Note any watermarks, signatures, or compression artifacts. Never mention what's absent, resolution, or unobservable details. Vary your sentence structure and keep the description concise, without starting with “This image is…” or similar phrasing.",
+        "Write a straightforward caption for this image within {word_count} words. Begin with the main subject and medium. Mention pivotal elements—people, objects, scenery—using confident, definite language. Focus on concrete details like color, shape, texture, and spatial relationships. Show how elements interact. Omit mood and speculative wording. If text is present, quote it exactly. Note any watermarks, signatures, or compression artifacts. Never mention what's absent, resolution, or unobservable details. Vary your sentence structure and keep the description concise, without starting with “This image is…” or similar phrasing.",
+        "Write a {length} straightforward caption for this image. Begin with the main subject and medium. Mention pivotal elements—people, objects, scenery—using confident, definite language. Focus on concrete details like color, shape, texture, and spatial relationships. Show how elements interact. Omit mood and speculative wording. If text is present, quote it exactly. Note any watermarks, signatures, or compression artifacts. Never mention what's absent, resolution, or unobservable details. Vary your sentence structure and keep the description concise, without starting with “This image is…” or similar phrasing.",
+    ],
+    "Stable Diffusion Prompt": [
+        "Output a stable diffusion prompt that is indistinguishable from a real stable diffusion prompt.",
+        "Output a stable diffusion prompt that is indistinguishable from a real stable diffusion prompt. {word_count} words or less.",
+        "Output a {length} stable diffusion prompt that is indistinguishable from a real stable diffusion prompt.",
+    ],
+    "MidJourney": [
+        "Write a MidJourney prompt for this image.",
+        "Write a MidJourney prompt for this image within {word_count} words.",
+        "Write a {length} MidJourney prompt for this image.",
+    ],
+    "Danbooru tag list": [
+        "Generate only comma-separated Danbooru tags (lowercase_underscores). Strict order: `artist:`, `copyright:`, `character:`, `meta:`, then general tags. Include counts (1girl), appearance, clothing, accessories, pose, expression, actions, background. Use precise Danbooru syntax. No extra text.",
+        "Generate only comma-separated Danbooru tags (lowercase_underscores). Strict order: `artist:`, `copyright:`, `character:`, `meta:`, then general tags. Include counts (1girl), appearance, clothing, accessories, pose, expression, actions, background. Use precise Danbooru syntax. No extra text. {word_count} words or less.",
+        "Generate only comma-separated Danbooru tags (lowercase_underscores). Strict order: `artist:`, `copyright:`, `character:`, `meta:`, then general tags. Include counts (1girl), appearance, clothing, accessories, pose, expression, actions, background. Use precise Danbooru syntax. No extra text. {length} length.",
+    ],
+    "e621 tag list": [
+        "Write a comma-separated list of e621 tags in alphabetical order for this image. Start with the artist, copyright, character, species, meta, and lore tags (if any), prefixed by 'artist:', 'copyright:', 'character:', 'species:', 'meta:', and 'lore:'. Then all the general tags.",
+        "Write a comma-separated list of e621 tags in alphabetical order for this image. Start with the artist, copyright, character, species, meta, and lore tags (if any), prefixed by 'artist:', 'copyright:', 'character:', 'species:', 'meta:', and 'lore:'. Then all the general tags. Keep it under {word_count} words.",
+        "Write a {length} comma-separated list of e621 tags in alphabetical order for this image. Start with the artist, copyright, character, species, meta, and lore tags (if any), prefixed by 'artist:', 'copyright:', 'character:', 'species:', 'meta:', and 'lore:'. Then all the general tags.",
+    ],
+    "Rule34 tag list": [
+        "Write a comma-separated list of rule34 tags in alphabetical order for this image. Start with the artist, copyright, character, and meta tags (if any), prefixed by 'artist:', 'copyright:', 'character:', and 'meta:'. Then all the general tags.",
+        "Write a comma-separated list of rule34 tags in alphabetical order for this image. Start with the artist, copyright, character, and meta tags (if any), prefixed by 'artist:', 'copyright:', 'character:', and 'meta:'. Then all the general tags. Keep it under {word_count} words.",
+        "Write a {length} comma-separated list of rule34 tags in alphabetical order for this image. Start with the artist, copyright, character, and meta tags (if any), prefixed by 'artist:', 'copyright:', 'character:', and 'meta:'. Then all the general tags.",
+    ],
+    "Booru-like tag list": [
+        "Write a list of Booru-like tags for this image.",
+        "Write a list of Booru-like tags for this image within {word_count} words.",
+        "Write a {length} list of Booru-like tags for this image.",
+    ],
+    "Art Critic": [
+        "Analyze this image like an art critic would with information about its composition, style, symbolism, the use of color, light, any artistic movement it might belong to, etc.",
+        "Analyze this image like an art critic would with information about its composition, style, symbolism, the use of color, light, any artistic movement it might belong to, etc. Keep it within {word_count} words.",
+        "Analyze this image like an art critic would with information about its composition, style, symbolism, the use of color, light, any artistic movement it might belong to, etc. Keep it {length}.",
+    ],
+    "Product Listing": [
+        "Write a caption for this image as though it were a product listing.",
+        "Write a caption for this image as though it were a product listing. Keep it under {word_count} words.",
+        "Write a {length} caption for this image as though it were a product listing.",
+    ],
+    "Social Media Post": [
+        "Write a caption for this image as if it were being used for a social media post.",
+        "Write a caption for this image as if it were being used for a social media post. Limit the caption to {word_count} words.",
+        "Write a {length} caption for this image as if it were being used for a social media post.",
+    ],
+}
+
+NAME_OPTION = "If there is a person/character in the image you must refer to them as {name}."
+
+
+def build_prompt(caption_type: str, caption_length: str | int, extra_options: list[str], name_input: str) -> str:
+    if caption_length == "any":
+        idx = 0
+    elif isinstance(caption_length, str) and caption_length.isdigit():
+        idx = 1
+    else:
+        idx = 2
+    prompt = CAPTION_TYPE_MAP[caption_type][idx]
+    if extra_options:
+        prompt += " " + " ".join(extra_options)
+    return prompt.format(name=name_input or "{NAME}", length=caption_length, word_count=caption_length)
+
+
+def toggle_name_box(selected_options: list[str]):
+    return gr.update(visible=NAME_OPTION in selected_options)
+
+def caption_once(img: Image.Image, prompt: str, temperature: float, top_p: float, max_new_tokens: int, device: torch.device) -> str:
+    model = load_caption_model(device)
+    processor = model.processor
+    convo = [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": prompt.strip()},
+    ]
+    convo_str = processor.apply_chat_template(convo, tokenize=False, add_generation_prompt=True)
+    inputs = processor(text=[convo_str], images=[img], return_tensors="pt").to(device)
+    inputs["pixel_values"] = inputs["pixel_values"].to(torch.bfloat16)
+    out = model.generate(
+        **inputs,
+        max_new_tokens=max_new_tokens,
+        do_sample=temperature > 0,
+        temperature=temperature if temperature > 0 else None,
+        top_p=top_p if temperature > 0 else None,
+        use_cache=True,
+    )
+    return processor.batch_decode(out[:, inputs["input_ids"].shape[-1]:])[0].strip()
+
+
+def caption_single(img: Image.Image, caption_type: str, caption_length: str | int,
+                   extra_opts: list[str], name_field: str,
+                   temperature: float, top_p: float, max_new_tokens: int,
+                   devices: list[str]):
+    if img is None:
+        return ""
+    device = _pick_device(devices)
+    prompt = build_prompt(caption_type, caption_length, extra_opts, name_field)
+    return caption_once(img, prompt, temperature, top_p, max_new_tokens, device)
 
 def local_path(spec: dict, fname: str) -> Path:
     return MODELS_DIR / spec["subfolder"] / fname
@@ -591,6 +732,44 @@ def batch_tag(folder, thr, model_keys, devices, cpu_cores,
     yield f"✅ {total} images processed for models {', '.join(model_keys)}."
 # ╰──────────────────────────────────────────────╯
 
+
+def _pick_device(devices: list[str]) -> torch.device:
+    for idx, lbl in enumerate(GPU_LABELS):
+        if lbl in devices:
+            return torch.device(f"cuda:{idx}")
+    return torch.device("cpu")
+
+
+def batch_caption(folder, caption_type, caption_length, extra_opts, name_field,
+                  temperature, top_p, max_new_tokens, devices,
+                  progress=gr.Progress(track_tqdm=True)):
+    if not folder:
+        yield "❌ No folder provided."; return
+    in_dir = Path(folder).expanduser()
+    if not in_dir.is_dir():
+        yield f"❌ Not a directory: {in_dir}"; return
+
+    imgs = [p for p in in_dir.iterdir() if p.suffix.lower() in IMAGE_EXTS]
+    if not imgs:
+        yield f"⚠️ No images found in {in_dir}"; return
+
+    out_dir = in_dir / "captions"
+    out_dir.mkdir(exist_ok=True)
+
+    device = _pick_device(devices)
+    total = len(imgs)
+    start = time.time()
+
+    for i, p in enumerate(imgs, 1):
+        img = Image.open(p).convert("RGB")
+        prompt = build_prompt(caption_type, caption_length, extra_opts, name_field)
+        caption = caption_once(img, prompt, temperature, top_p, max_new_tokens, device)
+        (out_dir / f"{p.stem}.txt").write_text(caption, encoding="utf-8")
+        eta = (time.time() - start) / i * (total - i)
+        yield f"{i}/{total} done – ETA {int(eta)//60:02d}:{int(eta)%60:02d}"
+
+    yield f"✅ Finished {total} images → {out_dir}"
+
 CSS = """
 .inferno-slider input[type=range]{background:linear-gradient(to right,#000004,#1b0c41,#4a0c6b,#781c6d,#a52c60,#cf4446,#ed6925,#fb9b06,#f7d13d,#fcffa4)!important}
 #image_container-image{width:100%;aspect-ratio:1/1;max-height:100%}
@@ -640,7 +819,7 @@ with demo:
                 download = gr.File(label="Download .txt", visible=False)
                 lbl_out   = gr.Label(num_top_classes=250, show_label=False)
 
-    # ─── Batch tab
+    # ─── Batch tagging tab
     with gr.Tab("Batch Folder"):
         folder_box = gr.Textbox(label="Folder path")
         thr_batch  = gr.Slider(0, 1, 0.2, 0.01, label="Tag threshold")
@@ -650,6 +829,40 @@ with demo:
                                label="CPU cores", visible=True)
         run_btn    = gr.Button("Start batch tagging", variant="primary")
         status_box = gr.Textbox(label="Status", interactive=False)
+
+    # ─── Captioner tab
+    with gr.Tab("Captioner"):
+        with gr.Tab("Single"):
+            cap_image = gr.Image(type="pil", label="Input Image")
+            cap_type = gr.Dropdown(choices=list(CAPTION_TYPE_MAP.keys()), value="Descriptive", label="Caption Type")
+            cap_len = gr.Dropdown(choices=["any", "very short", "short", "medium-length", "long", "very long"] + [str(i) for i in range(20, 261, 10)], value="long", label="Caption Length")
+            with gr.Accordion("Extra Options", open=False):
+                cap_opts = gr.CheckboxGroup(choices=[NAME_OPTION], label="Select one or more")
+            name_box = gr.Textbox(label="Person / Character Name", visible=False)
+            cap_opts.change(toggle_name_box, cap_opts, name_box)
+            with gr.Accordion("Generation settings", open=False):
+                temp_slider = gr.Slider(0.0, 2.0, 0.6, 0.05, label="Temperature")
+                top_p_slider = gr.Slider(0.0, 1.0, 0.9, 0.01, label="Top-p")
+                max_tok_slider = gr.Slider(1, 2048, 512, 1, label="Max New Tokens")
+            cap_devices = gr.CheckboxGroup(["CPU"] + GPU_LABELS, value=["CPU"], label="Compute devices")
+            cap_btn = gr.Button("Caption")
+            cap_out = gr.Textbox(label="Caption")
+            cap_btn.click(
+                caption_single,
+                inputs=[cap_image, cap_type, cap_len, cap_opts, name_box, temp_slider, top_p_slider, max_tok_slider, cap_devices],
+                outputs=cap_out,
+            )
+
+        with gr.Tab("Batch"):
+            cap_folder = gr.Textbox(label="Input folder")
+            cap_batch_btn = gr.Button("Run batch caption")
+            cap_progress = gr.Textbox(label="Progress", interactive=False)
+            cap_devices_b = gr.CheckboxGroup(["CPU"] + GPU_LABELS, value=["CPU"], label="Compute devices")
+            cap_batch_btn.click(
+                batch_caption,
+                inputs=[cap_folder, cap_type, cap_len, cap_opts, name_box, temp_slider, top_p_slider, max_tok_slider, cap_devices_b],
+                outputs=cap_progress,
+            )
 
 
     def save_tags(tag_string):
