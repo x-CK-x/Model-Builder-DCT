@@ -13,6 +13,9 @@ dependencies:
   - pillow>=10.3
   - matplotlib
   - pandas
+  - onnx
+  - onnxruntime
+  - onnxruntime-gpu
 
   - pip
   - pip:
