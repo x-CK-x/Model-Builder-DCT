@@ -31,10 +31,10 @@ All features here will be integrated into the data curation tool.
 
 | Status | Task Description | Priority Order |
 |---|---|---|
-| [X] | Automatic installation of miniconda (package-manager) for the user, built into the batch script; 1-time install | 1 |
-| [X] | Linux/MacOS support; as a shell script | 2 |
-| [X] | Captioning Models (JoyCaptioner) | 3 |
-| [ ] | API Access Captioning Models | 4 |
+| [ X ] | Automatic installation of miniconda (package-manager) for the user, built into the batch script; 1-time install | 1 |
+| [ X ] | Linux/MacOS support; as a shell script | 2 |
+| [ X ] | Captioning Models (JoyCaptioner) | 3 |
+| [ X ] | API Access Captioning Models | 4 |
 | [ ] | Tag Cleaning/Pruning Utility | 5 |
 | [ ] | Full Pipeline Automation of Data Prep for specific set of model types (Diffusion/LLM LoRAs, classifiers, et al.) | 6 |
 | [ ] | Prototype new gradio UI components | 7 |
