@@ -29,6 +29,7 @@ from transformers import (
 import json, math
 import numpy as np
 from openrouter_tab import add_openrouter_tab
+from clean_tags_tab import add_clean_tags_tabs
 from collections import defaultdict
 from pathlib import Path
 
@@ -867,6 +868,8 @@ with demo:
 
     # ─── OpenRouter API tab -------------------------------------------------
     add_openrouter_tab()
+    # ─── Tag Cleaning Utility tab ------------------------------------------
+    add_clean_tags_tabs()
 
     def save_tags(tag_string):
         if not tag_string:
