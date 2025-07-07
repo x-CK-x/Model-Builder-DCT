@@ -12,6 +12,7 @@ dependencies:
   - msgspec
   - pillow>=10.3
   - matplotlib
+  - pandas
 
   - pip
   - pip:
@@ -23,6 +24,7 @@ dependencies:
       - transformers==4.51.0
       - accelerate
       - sentencepiece
+      - jinja2
   # ↓ anything else that has Conda builds ↓
   # - opencv
   # - ...
