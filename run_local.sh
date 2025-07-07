@@ -18,8 +18,17 @@ DO_UPDATE=0
 
 # 1) Ensure Conda is present --------------------------------------------------
 if [[ ! -x "${CONDA_ROOT}/bin/conda" ]]; then
-    echo "✖  Cannot find conda at ${CONDA_ROOT}"
-    exit 1
+    echo "➜  Installing Miniconda to ${CONDA_ROOT}..."
+    MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh"
+    if [[ "$(uname)" == "Darwin" ]]; then
+        MINICONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh"
+    fi
+    curl -L "$MINICONDA_URL" -o /tmp/miniconda.sh || {
+        echo "✖  Failed to download Miniconda";
+        exit 1;
+    }
+    bash /tmp/miniconda.sh -b -p "${CONDA_ROOT}"
+    rm -f /tmp/miniconda.sh
 fi
 
 # 2) Make Conda functions available in this shell ----------------------------
