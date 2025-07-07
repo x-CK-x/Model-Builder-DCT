@@ -33,14 +33,13 @@ All features here will be integrated into the data curation tool.
 |---|---|---|
 | [X] | Automatic installation of miniconda (package-manager) for the user, built into the batch script; 1-time install | 1 |
 | [X] | Linux/MacOS support; as a shell script | 2 |
+| [X] | Captioning Models (JoyCaptioner) | 3 |
+| [ ] | API Access Captioning Models | 4 |
+| [ ] | Tag Cleaning/Pruning Utility | 5 |
+| [ ] | Full Pipeline Automation of Data Prep for specific set of model types (Diffusion/LLM LoRAs, classifiers, et al.) | 6 |
+| [ ] | Prototype new gradio UI components | 7 |
+| [ ] | Merge tool with the Data Curation Tool Project | 8 |
 
-- new model list **[TBD]**
-- new UI features **[TBD]**
-- new custom gradio components **[TBD]**
-- new data management features **[TBD]**
-- new data analysis tools **[TBD]**
-- new manual & automatic data augmentation & data pipeline features **[TBD]**
-
-Credits for model development:
+Credits for current model development/options:
 - https://huggingface.co/RedRocket/JointTaggerProject
-- 
+- https://huggingface.co/fancyfeast
