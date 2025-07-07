@@ -28,6 +28,7 @@ from transformers import (
 )
 import json, math
 import numpy as np
+from openrouter_tab import add_openrouter_tab
 from collections import defaultdict
 from pathlib import Path
 
@@ -864,6 +865,8 @@ with demo:
                 outputs=cap_progress,
             )
 
+    # ─── OpenRouter API tab -------------------------------------------------
+    add_openrouter_tab()
 
     def save_tags(tag_string):
         if not tag_string:
