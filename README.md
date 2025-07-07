@@ -14,6 +14,7 @@ All features here will be integrated into the data curation tool.
 1) Download the repository
 2) Either: In your windows command line terminal run the following command ``run_local.bat`` from within that folder. OR double-click the ``run_local.bat`` file.
 3) Wait until the terminal or pop-up window gives the localhost gradio url & use the browser of your choice to load the GUI with the url.
+4) The captioning interface is now included in the main UI and launches with the same command.
 
 -> *please note that the gradio GUI sharing feature (is OFF)* by default.
 
@@ -23,6 +24,7 @@ All features here will be integrated into the data curation tool.
 - options to select multiple models to run at the same time over the same specified data
 - options combine results with models selected
 - options to run [classification, grad_cam visualization] tasks
+- JoyCaptioner tab for single image or batch captioning with prompt customization
 - supports gpu & cpu run options; all compute options can be enabled in batch mode for higher efficiency (using a forkjoin pool & a thread-safe img queue)
 
 ### Features to be implemented:
