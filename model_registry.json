@@ -7,7 +7,8 @@
     "num_classes": 9083,
     "tags_file": "tagger_tags.json",
     "head_type": "gated",
-    "supports_cam": true
+    "supports_cam": true,
+    "backend": "pytorch"
   },
   "pilot1": {
     "repo": "RedRocket/JointTaggerProject",
@@ -17,6 +18,62 @@
     "num_classes": 9083,
     "tags_file": "tagger_tags.json",
     "head_type": "linear",
-    "supports_cam": true
+    "supports_cam": true,
+    "backend": "pytorch"
+  },
+  "pilot2-2": {
+    "repo": "RedRocket/JointTaggerProject",
+    "subfolder": "JTP_PILOT2-2",
+    "filename": "JTP_PILOT2-2-e3-vit_so400m_patch14_siglip_384.safetensors",
+    "timm_id": "vit_so400m_patch14_siglip_384.webli",
+    "num_classes": 9083,
+    "tags_file": "tagger_tags.json",
+    "head_type": "gated",
+    "supports_cam": true,
+    "backend": "pytorch"
+  },
+  "z3d_convnext": {
+    "repo": "Thouph/Z3D-Convnext",
+    "subfolder": "",
+    "filename": "model.onnx",
+    "timm_id": "",
+    "num_classes": 9525,
+    "tags_file": "tags.csv",
+    "head_type": "linear",
+    "supports_cam": false,
+    "backend": "onnx"
+  },
+  "eva02_clip_7704": {
+    "repo": "Thouph/eva02-clip-vit-large-7704",
+    "subfolder": "",
+    "filename": "model.onnx",
+    "timm_id": "",
+    "num_classes": 7704,
+    "tags_file": "tags.json",
+    "head_type": "linear",
+    "supports_cam": false,
+    "backend": "onnx"
+  },
+  "eva02_vit_8046": {
+    "repo": "Thouph/eva02-vit-large-448-8046",
+    "subfolder": "",
+    "filename": "model.onnx",
+    "timm_id": "",
+    "num_classes": 8046,
+    "tags_file": "tags.json",
+    "head_type": "linear",
+    "supports_cam": false,
+    "backend": "onnx"
+  },
+  "efficientnetv2_m_8035": {
+    "repo": "Thouph/experimental_efficientnetv2_m_8035",
+    "subfolder": "",
+    "filename": "model.onnx",
+    "timm_id": "",
+    "num_classes": 8035,
+    "tags_file": "tags.json",
+    "head_type": "linear",
+    "supports_cam": false,
+    "backend": "onnx"
   }
 }

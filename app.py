@@ -20,6 +20,7 @@ import msgspec, torch
 from torchvision.transforms import transforms, InterpolationMode
 import torchvision.transforms.functional as TF
 import timm, safetensors.torch, gradio as gr
+import onnxruntime as ort
 from huggingface_hub import hf_hub_download
 from transformers import (
     LlavaForConditionalGeneration,
@@ -236,23 +237,26 @@ def load_model(key: str, device: torch.device, progress: gr.Progress | None = No
         )
         tracker(1)
 
-    # build the model
-    m = timm.create_model(spec["timm_id"],
-                          pretrained=False,
-                          num_classes=spec["num_classes"]).to(device)
-    # choose head by spec -----------------------------------------------
-    if spec.get("head_type", "gated") == "gated":
-        m.head = GatedHead(min(m.head.weight.shape), spec["num_classes"])
-    else:  # "linear"
-        m.head = torch.nn.Linear(min(m.head.weight.shape), spec["num_classes"])
+    if spec.get("backend", "pytorch") == "onnx":
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if device.type == "cuda" else ["CPUExecutionProvider"]
+        session = ort.InferenceSession(str(ckpt_path), providers=providers)
+        _model_cache[cache_k] = session
+        return session
+    else:
+        m = timm.create_model(spec["timm_id"],
+                              pretrained=False,
+                              num_classes=spec["num_classes"]).to(device)
+        if spec.get("head_type", "gated") == "gated":
+            m.head = GatedHead(min(m.head.weight.shape), spec["num_classes"])
+        else:
+            m.head = torch.nn.Linear(min(m.head.weight.shape), spec["num_classes"])
 
-    safetensors.torch.load_model(m, str(ckpt_path), strict=False)
+        safetensors.torch.load_model(m, str(ckpt_path), strict=False)
 
-    m.to(device)          # keep weights on the right device
-    m.eval()
-
-    _model_cache[cache_k] = m
-    return m
+        m.to(device)
+        m.eval()
+        _model_cache[cache_k] = m
+        return m
 # ╰──────────────────────────────────────────────────────────────────────────────╯
 
 # ╭──────────── Image transforms ──────────────╮
@@ -307,11 +311,18 @@ with open("tagger_tags.json", "rb") as f:
 TAGS = {k.replace("_", " "): v for k, v in TAGS_R.items()}
 ALLOWED = list(TAGS.keys())
 
-def classify_tensor(t: torch.Tensor, m, thr, head_type="gated"):
+def classify_tensor(t: torch.Tensor, m, thr, head_type="gated", backend="pytorch"):
     with torch.no_grad():
-        logits = m(t)[0]
-        probits = torch.sigmoid(logits) if head_type == "linear" else logits
-        vals,idxs=probits.cpu().topk(250)
+        if backend == "onnx":
+            input_name = m.get_inputs()[0].name
+            output_name = m.get_outputs()[0].name
+            out = m.run([output_name], {input_name: t.cpu().numpy()})[0]
+            logits = torch.from_numpy(out)[0]
+            probits = torch.sigmoid(logits)
+        else:
+            logits = m(t)[0]
+            probits = torch.sigmoid(logits) if head_type == "linear" else logits
+        vals, idxs = probits.cpu().topk(250)
     sc={ALLOWED[i.item()]:v.item() for i,v in zip(idxs,vals)}
     filt={k:v for k,v in sc.items() if v>thr}
     return ", ".join(filt.keys()), sc
@@ -674,7 +685,7 @@ def worker_loop(dev_key, q, model_keys, thr, out_root,
             img = Image.open(p).convert("RGBA")
             t   = TRANSFORM(img).unsqueeze(0).to(dev)
             for k, m in models.items():
-                tags, _ = classify_tensor(t, m, thr, REG[k]["head_type"])
+                tags, _ = classify_tensor(t, m, thr, REG[k]["head_type"], REG[k].get("backend", "pytorch"))
                 out_dir = out_root / k
                 out_dir.mkdir(parents=True, exist_ok=True)
                 (out_dir / f"{p.stem}.txt").write_text(tags, encoding="utf-8")
@@ -896,7 +907,7 @@ with demo:
             dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
             m   = load_model(k, dev)
             t   = TRANSFORM(img.convert("RGBA")).unsqueeze(0).to(dev)
-            _, sc = classify_tensor(t, m, 0.0, REG[k]["head_type"])      # keep all scores
+            _, sc = classify_tensor(t, m, 0.0, REG[k]["head_type"], REG[k].get("backend", "pytorch"))      # keep all scores
             for tag, val in sc.items():
                 full_scores[tag].append(val)
 
