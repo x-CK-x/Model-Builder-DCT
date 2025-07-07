@@ -7,7 +7,7 @@ All features here will be integrated into the data curation tool.
 
 ## Prerequisites:
 
-- https://www.anaconda.com/docs/getting-started/miniconda/install
+- Miniconda (automatically installed by the launch scripts if missing)
 
 ## Run Instructions:
 
@@ -31,7 +31,7 @@ All features here will be integrated into the data curation tool.
 
 | Status | Task Description | Priority Order |
 |---|---|---|
-| [ ] | Automatic installation of miniconda (package-manager) for the user, built into the batch script; 1-time install | 1 |
+| [X] | Automatic installation of miniconda (package-manager) for the user, built into the batch script; 1-time install | 1 |
 | [X] | Linux/MacOS support; as a shell script | 2 |
 
 - new model list **[TBD]**
