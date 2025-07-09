@@ -33,6 +33,7 @@ import json, math
 from user_config import load_config, update_config
 from openrouter_tab import add_openrouter_tab
 from clean_tags_tab import add_clean_tags_tabs
+from pipeline_tab import add_pipeline_tab
 from collections import defaultdict
 
 out_dir = None
@@ -974,6 +975,8 @@ with demo:
     add_openrouter_tab()
     # ─── Tag Cleaning Utility tab ------------------------------------------
     add_clean_tags_tabs()
+    # ─── Automation Pipeline tab -------------------------------------------
+    add_pipeline_tab()
 
     def save_tags(tag_string):
         if not tag_string:
