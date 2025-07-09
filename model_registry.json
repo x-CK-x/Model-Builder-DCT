@@ -33,8 +33,11 @@
     "backend": "pytorch"
   },
   "z3d_convnext": {
-    "repo": "Thouph/Z3D-Convnext",
-    "subfolder": "",
+    "repo": "",
+    "urls": [
+      "https://pixeldrain.com/api/file/iNMyyi2w"
+    ],
+    "subfolder": "Z3D-E621-Convnext",
     "filename": "model.onnx",
     "timm_id": "",
     "num_classes": 9525,

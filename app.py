@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import copy
-import os, re, queue, threading
+import os, re, queue, threading, zipfile
 from pathlib import Path
 from typing import Tuple, Dict, List, Generator
 
@@ -22,17 +22,17 @@ import torchvision.transforms.functional as TF
 import timm, safetensors.torch, gradio as gr
 import onnxruntime as ort
 from huggingface_hub import hf_hub_download
+import requests
+from tqdm import tqdm
 from transformers import (
     LlavaForConditionalGeneration,
     TextIteratorStreamer,
     AutoProcessor,
 )
 import json, math
-import numpy as np
 from openrouter_tab import add_openrouter_tab
 from clean_tags_tab import add_clean_tags_tabs
 from collections import defaultdict
-from pathlib import Path
 
 out_dir = None
 
@@ -67,6 +67,28 @@ class GatedHead(torch.nn.Module):
         return self.act(x[:, : self.c]) * self.gate(x[:, self.c:])
 
 _model_cache: Dict[str, timm.models.VisionTransformer] = {}
+
+def _download_file(url: str, dest: Path):
+    r = requests.get(url, stream=True)
+    r.raise_for_status()
+    total = int(r.headers.get("content-length", 0))
+    with tqdm(total=total, unit="B", unit_scale=True, desc=dest.name) as pbar:
+        with open(dest, "wb") as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+                    pbar.update(len(chunk))
+    return dest
+
+def _extract_archive(path: Path, dest: Path):
+    if path.suffix == "" and not zipfile.is_zipfile(path):
+        path_zip = path.with_suffix(".zip")
+        path.rename(path_zip)
+        path = path_zip
+    if zipfile.is_zipfile(path):
+        with zipfile.ZipFile(path, "r") as zf:
+            zf.extractall(dest)
+        path.unlink()
 
 # ────────────── Caption model setup ──────────────
 CAPTION_REPO = "fancyfeast/llama-joycaption-beta-one-hf-llava"
@@ -229,12 +251,31 @@ def load_model(key: str, device: torch.device, progress: gr.Progress | None = No
         tracker = progress or gr.Progress(track_tqdm=True)
         tracker(0, desc=f"Downloading {key} …", total=1, unit="file")
 
-        hf_hub_download(
-            repo_id=spec["repo"],
-            subfolder=spec["subfolder"],  # <- REMOTE path
-            filename=spec["filename"],
-            local_dir=ckpt_root,  # <- LOCAL root (models/)
-        )
+        if spec.get("repo"):
+            hf_hub_download(
+                repo_id=spec["repo"],
+                subfolder=spec["subfolder"],
+                filename=spec["filename"],
+                local_dir=ckpt_root,
+            )
+        elif spec.get("urls"):
+            for url in spec["urls"]:
+                fname = url.split("/")[-1]
+                dest = ckpt_root / fname
+                _download_file(url, dest)
+                _extract_archive(dest, ckpt_root)
+            if key == "z3d_convnext":
+                base = ckpt_root / "Z3D-E621-Convnext"
+                src = base / "Z3D-E621-Convnext.onnx"
+                dst = base / "model.onnx"
+                if src.exists() and not dst.exists():
+                    src.rename(dst)
+                src_csv = base / "tags-selected.csv"
+                dst_csv = base / "tags.csv"
+                if src_csv.exists() and not dst_csv.exists():
+                    src_csv.rename(dst_csv)
+        else:
+            raise ValueError("No download source for model")
         tracker(1)
 
     if spec.get("backend", "pytorch") == "onnx":
