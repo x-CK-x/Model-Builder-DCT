@@ -36,7 +36,7 @@ All features here will be integrated into the data curation tool.
 | [X] | Captioning Models (JoyCaptioner) | 3 |
 | [X] | API Access Captioning Models | 4 |
 | [X] | Tag Cleaning/Pruning Utility | 5 |
-| [ ] | Full Pipeline Automation of Data Prep for specific set of model types (Diffusion/LLM LoRAs, classifiers, et al.) | 6 |
+| [X] | Full Pipeline Automation of Data Prep for specific set of model types (Diffusion/LLM LoRAs, classifiers, et al.) | 6 |
 | [ ] | Prototype new gradio UI components | 7 |
 | [ ] | Merge tool with the Data Curation Tool Project | 8 |
 
