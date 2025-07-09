@@ -31,26 +31,21 @@ Your task is to describe every aspect, object, and interaction within this image
     \"\u2022 use underscores_not_spaces \"
     \"\u2022 (((return ONLY a comma-separated list of tags, nothing else.)))""".strip()
 
-CONFIG_PATH = Path(__file__).with_name("session_config.json")
+from user_config import load_config, update_config
 
 
-def load_config() -> dict:
-    if CONFIG_PATH.exists():
-        try:
-            return json.loads(CONFIG_PATH.read_text())
-        except Exception:
-            pass
-    return {}
+def _load_section() -> dict:
+    return load_config().get("openrouter", {})
 
 
 def save_config(api_key: str, model: str, mode: str, prompt_extra: str):
-    data = {
-        "api_key": api_key.strip(),
-        "model": model,
-        "mode": mode,
-        "prompt_extra": prompt_extra,
-    }
-    CONFIG_PATH.write_text(json.dumps(data, indent=2))
+    update_config(
+        "openrouter",
+        api_key=api_key.strip(),
+        model=model,
+        mode=mode,
+        prompt_extra=prompt_extra,
+    )
 
 
 def read_file_utf8(path: Path) -> str:
@@ -174,7 +169,7 @@ def process_batch(api_key: str, mode: str, prompt_extra: str, folder: str, model
 
 
 def add_openrouter_tab():
-    cfg = load_config()
+    cfg = _load_section()
     with gr.Tab("OpenRouter Tagger"):
         gr.Markdown("## Character-LoRA Tagging / Tag-Refinement Tool")
         with gr.Row():

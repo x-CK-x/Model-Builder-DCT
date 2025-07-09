@@ -16,6 +16,11 @@ from pathlib import Path
 import re, itertools, collections
 import gradio as gr
 from e6_tag_utils import sanitize_tag_list
+from user_config import load_config, update_config
+
+_CFG = load_config()
+_CFG_ARTIST = _CFG.get("artist_llm", {})
+_CFG_PRUNE = _CFG.get("prune_tags", {})
 
 # existing std-lib imports …
 import re, itertools, collections, json, torch       #  ← add torch
@@ -530,8 +535,8 @@ with gr.Blocks(title="Tag-Cleaner Utility") as demo:
         # replace the old dropdown construction
         with gr.Row():
             model_drop = gr.Dropdown(
-                choices=list(MODELS.keys()),  # ⇐ aliases only
-                value=DEFAULT_ALIAS,  # ⇐ default alias
+                choices=list(MODELS.keys()),
+                value=_CFG_ARTIST.get("model", DEFAULT_ALIAS),
                 label="LLM model",
             )
 
@@ -556,12 +561,13 @@ with gr.Blocks(title="Tag-Cleaner Utility") as demo:
         llm_prompt = gr.Textbox(
             label="LLM Prompt / Instructions",
             lines=8,
-            value=DEFAULT_INSTR,
+            value=_CFG_ARTIST.get("llm_prompt", DEFAULT_INSTR),
         )
-        temperature = gr.Slider(0.0, 2.0, value=0.2, step=0.05,
-                                label="Temperature")
-        # ────────────── UI construction … (unchanged until here) ──────────────
-        do_sample = gr.Checkbox(False, label="Use sampling (do_sample)")
+        temperature = gr.Slider(
+            0.0, 2.0, value=_CFG_ARTIST.get("temperature", 0.2), step=0.05,
+            label="Temperature")
+        do_sample = gr.Checkbox(
+            _CFG_ARTIST.get("do_sample", False), label="Use sampling (do_sample)")
 
         run_btn = gr.Button("Extract Artists (NuMind)")  # ← already there
         simple_btn = gr.Button("Extract Uploader + Year")  # ← 🆕 line
@@ -576,6 +582,7 @@ with gr.Blocks(title="Tag-Cleaner Utility") as demo:
             type="password",
             lines=1,
             placeholder="hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            value=_CFG_ARTIST.get("hf_token", ""),
         )
 
     # ── ❸ PRIORITISED MERGE (username+year  ⊕  other-tags) ────────────
@@ -625,10 +632,15 @@ with gr.Blocks(title="Tag-Cleaner Utility") as demo:
             prune_img_path = gr.Textbox(label="Image folder", placeholder="C:\\images")
             prune_txt_path = gr.Textbox(label="Text-tag folder", placeholder="C:\\tags")
         with gr.Row():
-            prune_model = gr.Dropdown(choices=list(MODELS.keys()),
-                                      value=DEFAULT_ALIAS, label="LLM model")
-            prune_token = gr.Textbox(label="HF token (if needed)",
-                                     type="password")
+            prune_model = gr.Dropdown(
+                choices=list(MODELS.keys()),
+                value=_CFG_PRUNE.get("model", DEFAULT_ALIAS),
+                label="LLM model")
+            prune_token = gr.Textbox(
+                label="HF token (if needed)",
+                type="password",
+                value=_CFG_PRUNE.get("hf_token", ""),
+            )
         load_btn = gr.Button("▶ Start / Load first")
         img_view = gr.Image(type="pil", label="Preview", height=380)
         with gr.Column():
@@ -897,6 +909,11 @@ with gr.Blocks(title="Tag-Cleaner Utility") as demo:
     # -----------------------------------------------------------------
     def _load_first(img_dir, txt_dir, model_alias, hf_token):
         img_dir, txt_dir = Path(img_dir).expanduser(), Path(txt_dir).expanduser()
+        update_config(
+            "prune_tags",
+            model=model_alias,
+            hf_token=hf_token.strip(),
+        )
         pairs = _pair_files(img_dir, txt_dir)
         if not pairs:
             return (gr.update(), gr.update(choices=[]), "⚠ No matching pairs.",
@@ -1044,6 +1061,15 @@ with gr.Blocks(title="Tag-Cleaner Utility") as demo:
     def run_artist_llm(folder, out_dir, prompt, temp, sample,
                        model_id, hf_token, prog=gr.Progress()):
         print(f"model_id = {model_id}")
+
+        update_config(
+            "artist_llm",
+            model=model_id,
+            hf_token=hf_token.strip(),
+            llm_prompt=prompt,
+            temperature=temp,
+            do_sample=sample,
+        )
 
         folder = Path(folder).expanduser()
         files  = sorted(folder.glob("*.txt"))
