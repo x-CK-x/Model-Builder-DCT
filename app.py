@@ -30,11 +30,16 @@ from transformers import (
     AutoProcessor,
 )
 import json, math
+from user_config import load_config, update_config
 from openrouter_tab import add_openrouter_tab
 from clean_tags_tab import add_clean_tags_tabs
 from collections import defaultdict
 
 out_dir = None
+
+CFG = load_config()
+CFG_CLASSIFY = CFG.get("classifier", {})
+CFG_CAPTION = CFG.get("captioner", {})
 
 # ╭───────────────────────── Device helpers ─────────────────────────╮
 def cuda_devices() -> list[str]:
@@ -744,6 +749,7 @@ IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
 
 def batch_tag(folder, thr, model_keys, devices, cpu_cores,
               progress=gr.Progress(track_tqdm=True)):
+    update_config("classifier", models=model_keys)
     if not folder:
         yield "❌ No folder provided."; return
     in_dir = Path(folder).expanduser()
@@ -824,6 +830,31 @@ def batch_caption(folder, caption_type, caption_length, extra_opts, name_field,
 
     yield f"✅ Finished {total} images → {out_dir}"
 
+def caption_single_wrapper(img, ctype, clen, opts, name, temp, top_p, max_tok, dev):
+    update_config(
+        "captioner",
+        type=ctype,
+        length=clen,
+        temperature=temp,
+        top_p=top_p,
+        max_new_tokens=max_tok,
+        devices=dev,
+    )
+    return caption_single(img, ctype, clen, opts, name, temp, top_p, max_tok, dev)
+
+
+def batch_caption_wrapper(folder, ctype, clen, opts, name, temp, top_p, max_tok, dev):
+    update_config(
+        "captioner",
+        type=ctype,
+        length=clen,
+        temperature=temp,
+        top_p=top_p,
+        max_new_tokens=max_tok,
+        devices=dev,
+    )
+    yield from batch_caption(folder, ctype, clen, opts, name, temp, top_p, max_tok, dev)
+
 CSS = """
 .inferno-slider input[type=range]{background:linear-gradient(to right,#000004,#1b0c41,#4a0c6b,#781c6d,#a52c60,#cf4446,#ed6925,#fb9b06,#f7d13d,#fcffa4)!important}
 #image_container-image{width:100%;aspect-ratio:1/1;max-height:100%}
@@ -840,7 +871,7 @@ with demo:
 
     model_menu = gr.Dropdown(
         choices=list(REG.keys()),
-        value="pilot2",
+        value=CFG_CLASSIFY.get("models", "pilot2"),
         multiselect=True,
         label="Models to run"
     )
@@ -888,21 +919,39 @@ with demo:
     with gr.Tab("Captioner"):
         with gr.Tab("Single"):
             cap_image = gr.Image(type="pil", label="Input Image")
-            cap_type = gr.Dropdown(choices=list(CAPTION_TYPE_MAP.keys()), value="Descriptive", label="Caption Type")
-            cap_len = gr.Dropdown(choices=["any", "very short", "short", "medium-length", "long", "very long"] + [str(i) for i in range(20, 261, 10)], value="long", label="Caption Length")
+            cap_type = gr.Dropdown(
+                choices=list(CAPTION_TYPE_MAP.keys()),
+                value=CFG_CAPTION.get("type", "Descriptive"),
+                label="Caption Type")
+            cap_len = gr.Dropdown(
+                choices=["any", "very short", "short", "medium-length", "long", "very long"] + [str(i) for i in range(20, 261, 10)],
+                value=CFG_CAPTION.get("length", "long"),
+                label="Caption Length")
             with gr.Accordion("Extra Options", open=False):
                 cap_opts = gr.CheckboxGroup(choices=[NAME_OPTION], label="Select one or more")
             name_box = gr.Textbox(label="Person / Character Name", visible=False)
             cap_opts.change(toggle_name_box, cap_opts, name_box)
             with gr.Accordion("Generation settings", open=False):
-                temp_slider = gr.Slider(0.0, 2.0, 0.6, 0.05, label="Temperature")
-                top_p_slider = gr.Slider(0.0, 1.0, 0.9, 0.01, label="Top-p")
-                max_tok_slider = gr.Slider(1, 2048, 512, 1, label="Max New Tokens")
-            cap_devices = gr.CheckboxGroup(["CPU"] + GPU_LABELS, value=["CPU"], label="Compute devices")
+                temp_slider = gr.Slider(
+                    0.0, 2.0,
+                    CFG_CAPTION.get("temperature", 0.6), 0.05,
+                    label="Temperature")
+                top_p_slider = gr.Slider(
+                    0.0, 1.0,
+                    CFG_CAPTION.get("top_p", 0.9), 0.01,
+                    label="Top-p")
+                max_tok_slider = gr.Slider(
+                    1, 2048,
+                    CFG_CAPTION.get("max_new_tokens", 512), 1,
+                    label="Max New Tokens")
+            cap_devices = gr.CheckboxGroup(
+                ["CPU"] + GPU_LABELS,
+                value=CFG_CAPTION.get("devices", ["CPU"]),
+                label="Compute devices")
             cap_btn = gr.Button("Caption")
             cap_out = gr.Textbox(label="Caption")
             cap_btn.click(
-                caption_single,
+                caption_single_wrapper,
                 inputs=[cap_image, cap_type, cap_len, cap_opts, name_box, temp_slider, top_p_slider, max_tok_slider, cap_devices],
                 outputs=cap_out,
             )
@@ -911,9 +960,12 @@ with demo:
             cap_folder = gr.Textbox(label="Input folder")
             cap_batch_btn = gr.Button("Run batch caption")
             cap_progress = gr.Textbox(label="Progress", interactive=False)
-            cap_devices_b = gr.CheckboxGroup(["CPU"] + GPU_LABELS, value=["CPU"], label="Compute devices")
+            cap_devices_b = gr.CheckboxGroup(
+                ["CPU"] + GPU_LABELS,
+                value=CFG_CAPTION.get("devices", ["CPU"]),
+                label="Compute devices")
             cap_batch_btn.click(
-                batch_caption,
+                batch_caption_wrapper,
                 inputs=[cap_folder, cap_type, cap_len, cap_opts, name_box, temp_slider, top_p_slider, max_tok_slider, cap_devices_b],
                 outputs=cap_progress,
             )
@@ -939,6 +991,7 @@ with demo:
 
     # ─── Single-image aggregation over selected models ──────────────────────
     def single(img, thr, model_keys):
+        update_config("classifier", models=model_keys)
         if img is None:
             return "", {}, {}, img
 
