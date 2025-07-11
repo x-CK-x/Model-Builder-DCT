@@ -13,14 +13,28 @@ set "PY_VER=3.11.9"
 :: --------------------------------------------------------------------
 
 setlocal enabledelayedexpansion
+
+:: 0) Install Miniconda automatically if missing
 if not exist "%CONDA_ROOT%\Scripts\conda.exe" (
-    echo XXX Cannot find conda at %CONDA_ROOT%
-    pause
-    exit /b 1
+    echo > Installing Miniconda to %CONDA_ROOT% ...
+    set "MINICONDA_URL=https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe"
+    set "MINICONDA_EXE=%TEMP%\miniconda_installer.exe"
+    powershell -Command "Invoke-WebRequest -Uri '%MINICONDA_URL%' -OutFile '%MINICONDA_EXE%'" || goto :fail
+    if exist "%MINICONDA_EXE%" (
+        start /wait "" "%MINICONDA_EXE%" /InstallationType=JustMe /AddToPath=0 /RegisterPython=0 /S /D=%CONDA_ROOT%
+        del "%MINICONDA_EXE%"
+    ) else (
+        echo XXX Miniconda download failed.
+        goto :fail
+    )
 )
+
+echo make ENV?
 
 rem  Make conda functions available in this shell
 call "%CONDA_ROOT%\Scripts\activate.bat" base
+
+echo conda base active!
 
 :: check for --update flag
 set "DO_UPDATE=0"
@@ -36,7 +50,11 @@ if not exist "%CONDA_ROOT%\envs\%ENV_NAME%" (
     ) else (
         call conda create -y -n %ENV_NAME% python=%PY_VER% conda-forge::pytorch-gpu || goto :fail
     )
+) else (
+    echo CONDA ENV by name FOUND!!!
 )
+
+echo env update?
 
 :: -----------------------------------------------------------------
 :: 2) Optional --update  → conda env update
@@ -50,8 +68,12 @@ if %DO_UPDATE%==1 (
     )
 )
 
+echo activating env
+
 :: activate env in THIS shell
 call conda activate %ENV_NAME%
+
+echo running app
 
 :: launch the app ------------------------------------------------------
 echo > Launching JointTagger …
