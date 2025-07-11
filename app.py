@@ -1180,6 +1180,8 @@ with demo:
                          thr: float,
                          img: Image.Image,
                          model_keys: list[str]):
+        if not event:
+            return img, {}
         tag = event.value
         print(f"tag:\t{tag}")
         if img is None:
@@ -1211,6 +1213,8 @@ with demo:
         multi-model averaging (grad_cam_average), depending on how many
         models are selected in the dropdown.
         """
+        if not tag:
+            return img, {}
         tag = tag["tag"]
         print(f"tag:\t{tag}")
         if img is None:
