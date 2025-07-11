@@ -1,33 +1,34 @@
 name: jointagger
 channels:
-  - conda-forge
-  - pytorch
+  - conda-forge          # everything except PyTorch
+  - pytorch              # official PyTorch binaries
+  - nvidia               # CUDA runtime (Linux)
 dependencies:
-  - python=3.11.9
-  - pytorch-gpu=2.7              # pulls torch + torchvision + CUDA libs
-  - torchvision=0.20.*
-  - torchaudio=2.7.*
+  - python=3.11
+  - pytorch-gpu = 2.7.*
+#  - torchvision = 0.20.*       # ← explicit, GPU build
+#  - torchaudio = 2.7.*
   - timm
-  - safetensors
   - msgspec
-  - pillow>=10.3
   - matplotlib
-  - pandas
-  - onnx
-  - onnxruntime
-  - onnxruntime-gpu
 
   - pip
+  - pandas
+  - pillow
+  - tqdm
+  - requests
+  - scikit-image
   - pip:
-      - gradio>=4.34.0
-      - requests>=2.32
-      - tqdm>=4.66
-      - python-dotenv>=1.0
-      - huggingface_hub
       - transformers==4.51.0
-      - accelerate
-      - sentencepiece
-      - jinja2
-  # ↓ anything else that has Conda builds ↓
-  # - opencv
-  # - ...
+      - accelerate                        #==0.29.3
+      - bitsandbytes                      #==0.43.1             # 4-bit loading
+      - safetensors                       #==0.4.3
+      - gradio
+      - huggingface_hub
+      - sentencepiece                    # some models need it
+      - jinja2                           # chat-template rendering
+      - gradio
+      - rich                             # nicer CLI logs (optional)
+      - python-dotenv>=1.0        # convenience only – optional
+      - onnxruntime
+      - onnxruntime-gpu
