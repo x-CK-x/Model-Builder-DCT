@@ -1,0 +1,6 @@
+# Ignore downloaded models and tag files
+models/
+tagger_tags.json
+*tags.json
+tags.csv
+__pycache__/
