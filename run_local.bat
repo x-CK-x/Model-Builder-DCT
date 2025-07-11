@@ -13,20 +13,10 @@ set "PY_VER=3.11.9"
 :: --------------------------------------------------------------------
 
 setlocal enabledelayedexpansion
-
-:: 0) Install Miniconda automatically if missing
 if not exist "%CONDA_ROOT%\Scripts\conda.exe" (
-    echo > Installing Miniconda to %CONDA_ROOT% ...
-    set "MINICONDA_URL=https://repo.anaconda.com/miniconda/Miniconda3-latest-Windows-x86_64.exe"
-    set "MINICONDA_EXE=%TEMP%\miniconda_installer.exe"
-    powershell -Command "Invoke-WebRequest -Uri '%MINICONDA_URL%' -OutFile '%MINICONDA_EXE%'" || goto :fail
-    if exist "%MINICONDA_EXE%" (
-        start /wait "" "%MINICONDA_EXE%" /InstallationType=JustMe /AddToPath=0 /RegisterPython=0 /S /D=%CONDA_ROOT%
-        del "%MINICONDA_EXE%"
-    ) else (
-        echo XXX Miniconda download failed.
-        goto :fail
-    )
+    echo XXX Cannot find conda at %CONDA_ROOT%
+    pause
+    exit /b 1
 )
 
 rem  Make conda functions available in this shell
