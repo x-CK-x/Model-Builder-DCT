@@ -353,12 +353,87 @@ TRANSFORM = transforms.Compose(
 # ╰────────────────────────────────────────────╯
 
 # ╭──────────── Tags & helpers ─────────────╮
-with open("tagger_tags.json", "rb") as f:
-    TAGS_R: Dict[str, int] = msgspec.json.decode(f.read(), type=Dict[str, int])
-TAGS = {k.replace("_", " "): v for k, v in TAGS_R.items()}
-ALLOWED = list(TAGS.keys())
+_TAGS: dict[str, list[str]] = {}
+_TAG_TO_IDX: dict[str, dict[str, int]] = {}
 
-def classify_tensor(t: torch.Tensor, m, thr, head_type="gated", backend="pytorch"):
+def _parse_tags_file(path: Path) -> tuple[list[str], dict[str, int]]:
+    """Return (tags_list, tag_to_idx) for ``path`` supporting JSON or CSV."""
+    if path.suffix.lower() == ".json":
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            mapping = {k.replace("_", " "): int(v) for k, v in data.items()}
+            size = max(mapping.values()) + 1
+            tags = [""] * size
+            for tag, idx in mapping.items():
+                if idx < size:
+                    tags[idx] = tag
+        elif isinstance(data, list):
+            tags = [str(t).replace("_", " ") for t in data]
+            mapping = {t: i for i, t in enumerate(tags)}
+        else:
+            raise ValueError(f"Unsupported JSON format: {path}")
+    elif path.suffix.lower() == ".csv":
+        import csv
+        tags = []
+        with open(path, newline="", encoding="utf-8") as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            if header and any(h.lower() in {"name", "tag", "tags"} for h in header):
+                idx = next(i for i, h in enumerate(header) if h.lower() in {"name", "tag", "tags"})
+            else:
+                if header:
+                    tags.append(header[0])
+                idx = 0
+            for row in reader:
+                if len(row) > idx:
+                    tags.append(row[idx])
+        tags = [t.strip().replace("_", " ") for t in tags]
+        mapping = {t: i for i, t in enumerate(tags)}
+    else:
+        raise ValueError(f"Unknown tag file type: {path}")
+    return tags, mapping
+
+
+def load_tags(model_key: str) -> tuple[list[str], dict[str, int]]:
+    """Load and cache the tag list for ``model_key`` on first use."""
+    if model_key in _TAGS:
+        return _TAGS[model_key], _TAG_TO_IDX[model_key]
+
+    spec = REG[model_key]
+    fname = spec.get("tags_file")
+    if not fname:
+        raise ValueError(f"Model {model_key} missing 'tags_file'")
+    path = local_path(spec, fname)
+
+    if not path.exists():
+        if spec.get("repo"):
+            hf_hub_download(
+                repo_id=spec["repo"],
+                subfolder=spec["subfolder"],
+                filename=fname,
+                local_dir=MODELS_DIR,
+            )
+        elif spec.get("urls"):
+            for url in spec["urls"]:
+                dest = MODELS_DIR / url.split("/")[-1]
+                _download_file(url, dest)
+                _extract_archive(dest, MODELS_DIR)
+        else:
+            raise ValueError(f"No download source for tags file of {model_key}")
+
+    tags, mapping = _parse_tags_file(path)
+    _TAGS[model_key] = tags
+    _TAG_TO_IDX[model_key] = mapping
+    return tags, mapping
+
+def classify_tensor(
+    t: torch.Tensor,
+    m,
+    thr: float,
+    tags: list[str],
+    head_type: str = "gated",
+    backend: str = "pytorch",
+):
     with torch.no_grad():
         if backend == "onnx":
             input_name = m.get_inputs()[0].name
@@ -369,9 +444,9 @@ def classify_tensor(t: torch.Tensor, m, thr, head_type="gated", backend="pytorch
         else:
             logits = m(t)[0]
             probits = torch.sigmoid(logits) if head_type == "linear" else logits
-        vals, idxs = probits.cpu().topk(250)
-    sc={ALLOWED[i.item()]:v.item() for i,v in zip(idxs,vals)}
-    filt={k:v for k,v in sc.items() if v>thr}
+        vals, idxs = probits.cpu().topk(min(250, len(tags)))
+    sc = {tags[i.item()]: v.item() for i, v in zip(idxs, vals) if i.item() < len(tags)}
+    filt = {k: v for k, v in sc.items() if v > thr}
     return ", ".join(filt.keys()), sc
 # ╰──────────────────────────────────────────╯
 
@@ -459,9 +534,11 @@ def debug_show_patch_coords(model, *, img_size=384, square=216):
 
 
 # 1️⃣ get_cam_array  ───────────────────────────────────────────
-def get_cam_array(img: Image.Image, tag: str, model) -> np.ndarray:
+def get_cam_array(img: Image.Image, tag: str, model, tag_to_idx) -> np.ndarray:
     dev = next(model.parameters()).device
-    idx = TAGS[tag]
+    idx = tag_to_idx.get(tag)
+    if idx is None:
+        return np.zeros((1, 1))
 
     t = TRANSFORM(img.convert("RGBA")).unsqueeze(0).to(dev).requires_grad_(True)
 
@@ -567,10 +644,13 @@ def _extract_overlay_pixels(composite: Image.Image, background: Image.Image) -> 
 
 
 def grad_cam(img: Image.Image, tag: str, m: torch.nn.Module,
+             tag_to_idx: dict[str, int],
              alpha: float, thr: float = 0.2) -> Image.Image:
     """Fully matches the HuggingFace demo Grad‑CAM pipeline."""
     dev = next(m.parameters()).device
-    idx = TAGS[tag]
+    idx = tag_to_idx.get(tag)
+    if idx is None:
+        return img, Image.new("RGBA", img.size, (0, 0, 0, 0))
 
     tensor = TRANSFORM(img.convert("RGBA")).unsqueeze(0).to(dev)
 
@@ -623,7 +703,8 @@ def grad_cam_average(img: Image.Image, tag: str, model_keys, alpha, thr=0.2):
         if not REG[k].get("supports_cam", True):
             continue
         model = load_model(k, dev)
-        _, ov = grad_cam(img, tag, model, alpha=alpha, thr=thr)  # we need only ov
+        _, tag_map = load_tags(k)
+        _, ov = grad_cam(img, tag, model, tag_map, alpha=alpha, thr=thr)  # we need only ov
         overlays.append(np.asarray(ov, dtype=np.float32) / 255.0)
 
     if not overlays:
@@ -697,7 +778,8 @@ def grad_cam_multi(event: gr.SelectData, img, model_keys, alpha, thr):
         if not REG[k].get("supports_cam", True):
             continue
         m   = load_model(k, dev)
-        idx = TAGS.get(tag_str)
+        _, tag_map = load_tags(k)
+        idx = tag_map.get(tag_str)
         if idx is None:
             continue
         cams.append(_safe_cam(img, tag_str, m, idx))
@@ -723,6 +805,7 @@ def worker_loop(dev_key, q, model_keys, thr, out_root,
                 total, counter, lock, progress):
     dev    = torch.device(dev_key)
     models = {k: load_model(k, dev) for k in model_keys}
+    tag_lists = {k: load_tags(k)[0] for k in model_keys}
     while True:
         try:
             p = q.get_nowait()
@@ -732,10 +815,17 @@ def worker_loop(dev_key, q, model_keys, thr, out_root,
             img = Image.open(p).convert("RGBA")
             t   = TRANSFORM(img).unsqueeze(0).to(dev)
             for k, m in models.items():
-                tags, _ = classify_tensor(t, m, thr, REG[k]["head_type"], REG[k].get("backend", "pytorch"))
+                tag_str, _ = classify_tensor(
+                    t,
+                    m,
+                    thr,
+                    tag_lists[k],
+                    REG[k]["head_type"],
+                    REG[k].get("backend", "pytorch"),
+                )
                 out_dir = out_root / k
                 out_dir.mkdir(parents=True, exist_ok=True)
-                (out_dir / f"{p.stem}.txt").write_text(tags, encoding="utf-8")
+                (out_dir / f"{p.stem}.txt").write_text(tag_str, encoding="utf-8")
         except Exception as e:
             print(f"[WARN] {p.name} skipped: {e}")
         finally:
@@ -1003,8 +1093,16 @@ with demo:
         for k in model_keys:
             dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
             m   = load_model(k, dev)
+            tags_list, _ = load_tags(k)
             t   = TRANSFORM(img.convert("RGBA")).unsqueeze(0).to(dev)
-            _, sc = classify_tensor(t, m, 0.0, REG[k]["head_type"], REG[k].get("backend", "pytorch"))      # keep all scores
+            _, sc = classify_tensor(
+                t,
+                m,
+                0.0,
+                tags_list,
+                REG[k]["head_type"],
+                REG[k].get("backend", "pytorch"),
+            )      # keep all scores
             for tag, val in sc.items():
                 full_scores[tag].append(val)
 
@@ -1082,16 +1180,23 @@ with demo:
                          thr: float,
                          img: Image.Image,
                          model_keys: list[str]):
+        if not event:
+            return img, {}
         tag = event.value
         print(f"tag:\t{tag}")
-        if img is None or tag not in TAGS:
+        if img is None:
             return img, {}
 
         if len(model_keys) == 1:
             dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
             m = load_model(model_keys[0], dev)
-            comp, ov = grad_cam(img, tag, m, alpha, thr)
+            _, tag_map = load_tags(model_keys[0])
+            if tag not in tag_map:
+                return img, {}
+            comp, ov = grad_cam(img, tag, m, tag_map, alpha, thr)
         else:
+            if all(tag not in load_tags(k)[1] for k in model_keys):
+                return img, {}
             comp = grad_cam_average(img, tag, model_keys, alpha, thr)
 
         return comp, {"tag": tag}
@@ -1108,16 +1213,23 @@ with demo:
         multi-model averaging (grad_cam_average), depending on how many
         models are selected in the dropdown.
         """
+        if not tag:
+            return img, {}
         tag = tag["tag"]
         print(f"tag:\t{tag}")
-        if img is None or tag not in TAGS:
+        if img is None:
             return img, {}
 
         if len(model_keys) == 1:
             dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
             m = load_model(model_keys[0], dev)
-            comp, ov = grad_cam(img, tag, m, alpha, thr)
+            _, tag_map = load_tags(model_keys[0])
+            if tag not in tag_map:
+                return img, {}
+            comp, ov = grad_cam(img, tag, m, tag_map, alpha, thr)
         else:
+            if all(tag not in load_tags(k)[1] for k in model_keys):
+                return img, {}
             comp = grad_cam_average(img, tag, model_keys, alpha, thr)
 
         return comp, {"tag": tag}
