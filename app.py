@@ -22,7 +22,7 @@ import torchvision.transforms.functional as TF
 import torch.nn.functional as F
 import timm, safetensors.torch, gradio as gr
 import onnxruntime as ort
-from huggingface_hub import hf_hub_download
+from huggingface_hub import hf_hub_download, EntryNotFoundError
 import requests
 from tqdm import tqdm
 from transformers import (
@@ -259,12 +259,21 @@ def load_model(key: str, device: torch.device, progress: gr.Progress | None = No
         tracker(0, desc=f"Downloading {key} …", total=1, unit="file")
 
         if spec.get("repo"):
-            hf_hub_download(
-                repo_id=spec["repo"],
-                subfolder=spec["subfolder"],
-                filename=spec["filename"],
-                local_dir=ckpt_root,
-            )
+            subf = spec.get("subfolder") or None
+            try:
+                hf_hub_download(
+                    repo_id=spec["repo"],
+                    subfolder=subf,
+                    filename=spec["filename"],
+                    local_dir=ckpt_root,
+                )
+            except EntryNotFoundError:
+                # Retry download from repository root if subfolder path is wrong
+                hf_hub_download(
+                    repo_id=spec["repo"],
+                    filename=spec["filename"],
+                    local_dir=ckpt_root,
+                )
         elif spec.get("urls"):
             for url in spec["urls"]:
                 fname = url.split("/")[-1]
@@ -426,12 +435,20 @@ def load_tags(model_key: str) -> tuple[list[str], dict[str, int]]:
 
     if not path.exists():
         if spec.get("repo"):
-            hf_hub_download(
-                repo_id=spec["repo"],
-                subfolder=spec["subfolder"],
-                filename=fname,
-                local_dir=MODELS_DIR,
-            )
+            subf = spec.get("subfolder") or None
+            try:
+                hf_hub_download(
+                    repo_id=spec["repo"],
+                    subfolder=subf,
+                    filename=fname,
+                    local_dir=MODELS_DIR,
+                )
+            except EntryNotFoundError:
+                hf_hub_download(
+                    repo_id=spec["repo"],
+                    filename=fname,
+                    local_dir=MODELS_DIR,
+                )
         elif spec.get("urls"):
             for url in spec["urls"]:
                 dest = MODELS_DIR / url.split("/")[-1]
