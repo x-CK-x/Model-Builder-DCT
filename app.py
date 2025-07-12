@@ -22,7 +22,21 @@ import torchvision.transforms.functional as TF
 import torch.nn.functional as F
 import timm, safetensors.torch, gradio as gr
 import onnxruntime as ort
-from huggingface_hub import hf_hub_download, EntryNotFoundError
+from huggingface_hub import hf_hub_download
+try:
+    # Available in newer versions
+    from huggingface_hub import EntryNotFoundError
+except Exception:  # pragma: no cover - maintain compatibility
+    try:
+        # Older versions expose HTTP errors under this name
+        from huggingface_hub import HfHubHTTPError as EntryNotFoundError
+    except Exception:
+        try:
+            from huggingface_hub.utils import HfHubHTTPError as EntryNotFoundError
+        except Exception:
+            class EntryNotFoundError(Exception):
+                """Fallback when huggingface_hub doesn't expose specific errors."""
+                pass
 import requests
 from tqdm import tqdm
 from transformers import (
