@@ -472,6 +472,12 @@ TRANSFORM_Z3D = transforms.Compose(
     ]
 )
 
+class BGR(torch.nn.Module):
+    """Swap channels from RGB to BGR for models trained with OpenCV."""
+
+    def forward(self, tensor: torch.Tensor) -> torch.Tensor:  # type: ignore[override]
+        return tensor[[2, 1, 0], ...]
+
 def get_transform(model_key: str):
     """Return the correct preprocessing transform for the model."""
     if model_key == "z3d_convnext":
