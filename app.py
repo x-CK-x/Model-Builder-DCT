@@ -19,6 +19,7 @@ import numpy as np, matplotlib.cm as cm
 import msgspec, torch
 from torchvision.transforms import transforms, InterpolationMode
 import torchvision.transforms.functional as TF
+import torch.nn.functional as F
 import timm, safetensors.torch, gradio as gr
 import onnxruntime as ort
 from huggingface_hub import hf_hub_download
@@ -438,7 +439,24 @@ def classify_tensor(
         if backend == "onnx":
             input_name = m.get_inputs()[0].name
             output_name = m.get_outputs()[0].name
-            out = m.run([output_name], {input_name: t.cpu().numpy()})[0]
+            arr = t.cpu()
+            shape = m.get_inputs()[0].shape
+            if len(shape) == 4:
+                if str(shape[1]) == "3":  # NCHW
+                    target = tuple(int(x) for x in shape[2:4] if isinstance(x, int))
+                    if len(target) == 2 and arr.shape[2:] != target:
+                        arr = F.interpolate(arr, size=target, mode="bilinear", align_corners=False)
+                    np_input = arr.numpy()
+                elif str(shape[-1]) == "3":  # NHWC
+                    target = tuple(int(x) for x in shape[1:3] if isinstance(x, int))
+                    if len(target) == 2 and arr.shape[2:] != target:
+                        arr = F.interpolate(arr, size=target, mode="bilinear", align_corners=False)
+                    np_input = arr.permute(0, 2, 3, 1).numpy()
+                else:
+                    np_input = arr.numpy()
+            else:
+                np_input = arr.numpy()
+            out = m.run([output_name], {input_name: np_input})[0]
             logits = torch.from_numpy(out)[0]
             probits = torch.sigmoid(logits)
         else:
