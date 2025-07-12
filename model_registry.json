@@ -37,7 +37,7 @@
   },
   "eva02_clip_7704": {
     "repo": "Thouph/eva02-clip-vit-large-7704",
-    "subfolder": "",
+    "subfolder": "eva02_clip_7704",
     "filename": "model.onnx",
     "timm_id": "",
     "num_classes": 7704,
@@ -48,7 +48,7 @@
   },
   "eva02_vit_8046": {
     "repo": "Thouph/eva02-vit-large-448-8046",
-    "subfolder": "",
+    "subfolder": "eva02_vit_8046",
     "filename": "model.onnx",
     "timm_id": "",
     "num_classes": 8046,
@@ -59,7 +59,7 @@
   },
   "efficientnetv2_m_8035": {
     "repo": "Thouph/experimental_efficientnetv2_m_8035",
-    "subfolder": "",
+    "subfolder": "efficientnetv2_m_8035",
     "filename": "model.onnx",
     "timm_id": "",
     "num_classes": 8035,
