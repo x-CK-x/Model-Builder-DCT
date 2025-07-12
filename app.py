@@ -24,6 +24,10 @@ import timm, safetensors.torch, gradio as gr
 import onnxruntime as ort
 from huggingface_hub import hf_hub_download
 try:
+    from huggingface_hub import HfApi
+except Exception:
+    HfApi = None  # pragma: no cover - old versions
+try:
     # Available in newer versions
     from huggingface_hub import EntryNotFoundError
 except Exception:  # pragma: no cover - maintain compatibility
@@ -110,6 +114,23 @@ def _extract_archive(path: Path, dest: Path):
         with zipfile.ZipFile(path, "r") as zf:
             zf.extractall(dest)
         path.unlink()
+
+def _find_repo_model_file(repo: str, subfolder: str | None) -> str | None:
+    """Return a model filename from a Hugging Face repo if present."""
+    patterns = (".onnx", ".safetensors", ".pt", ".bin")
+    if HfApi is None:
+        return None
+    try:
+        files = HfApi().list_repo_files(repo)
+    except Exception:
+        return None
+    candidates = [f for f in files if f.lower().endswith(patterns)]
+    if subfolder:
+        sub = subfolder.strip("/") + "/"
+        for f in candidates:
+            if f.startswith(sub):
+                return f
+    return candidates[0] if candidates else None
 
 # ────────────── Caption model setup ──────────────
 CAPTION_REPO = "fancyfeast/llama-joycaption-beta-one-hf-llava"
@@ -284,6 +305,7 @@ def load_model(key: str, device: torch.device, progress: gr.Progress | None = No
                     local_dir=ckpt_root,
                 )
             except EntryNotFoundError:
+                alt_path = None
                 try:
                     hf_hub_download(
                         repo_id=spec["repo"],
@@ -291,11 +313,27 @@ def load_model(key: str, device: torch.device, progress: gr.Progress | None = No
                         local_dir=ckpt_root,
                     )
                 except EntryNotFoundError:
-                    hf_hub_download(
-                        repo_id=spec["repo"],
-                        filename=spec["filename"],
-                        local_dir=ckpt_root,
-                    )
+                    try:
+                        hf_hub_download(
+                            repo_id=spec["repo"],
+                            filename=spec["filename"],
+                            local_dir=ckpt_root,
+                        )
+                    except EntryNotFoundError:
+                        alt_path = _find_repo_model_file(spec["repo"], sub_remote)
+                        if alt_path:
+                            hf_hub_download(
+                                repo_id=spec["repo"],
+                                filename=alt_path,
+                                local_dir=ckpt_root,
+                            )
+                            ckpt_path = ckpt_root / sub_local / Path(alt_path).name
+                            dl_path = ckpt_root / alt_path
+                            if dl_path.exists() and not ckpt_path.exists():
+                                ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+                                dl_path.rename(ckpt_path)
+                        else:
+                            raise
         elif spec.get("urls"):
             for url in spec["urls"]:
                 fname = url.split("/")[-1]
