@@ -43,3 +43,9 @@ All features here will be integrated into the data curation tool.
 Credits for current model development/options:
 - https://huggingface.co/RedRocket/JointTaggerProject
 - https://huggingface.co/fancyfeast
+
+### Model-specific notes
+
+- **z3d_convnext**: this ONNX model expects raw pixel values in `[0, 1]` range.
+  Unlike the other classifiers, mean normalization is not applied during
+  preprocessing.

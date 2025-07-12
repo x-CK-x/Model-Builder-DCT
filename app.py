@@ -288,6 +288,7 @@ def load_model(key: str, device: torch.device, progress: gr.Progress | None = No
     if spec.get("backend", "pytorch") == "onnx":
         providers = ["CUDAExecutionProvider", "CPUExecutionProvider"] if device.type == "cuda" else ["CPUExecutionProvider"]
         session = ort.InferenceSession(str(ckpt_path), providers=providers)
+        setattr(session, "_registry_key", key)
         _model_cache[cache_k] = session
         return session
     else:
@@ -303,6 +304,7 @@ def load_model(key: str, device: torch.device, progress: gr.Progress | None = No
 
         m.to(device)
         m.eval()
+        setattr(m, "_registry_key", key)
         _model_cache[cache_k] = m
         return m
 # ╰──────────────────────────────────────────────────────────────────────────────╯
@@ -351,6 +353,22 @@ TRANSFORM = transforms.Compose(
         transforms.CenterCrop((384, 384)),
     ]
 )
+
+# Normalization-free version for models that don't expect zero-centered inputs
+TRANSFORM_NO_MEAN = transforms.Compose(
+    [
+        Fit((384, 384)),
+        transforms.ToTensor(),
+        CompositeAlpha(0.5),
+        transforms.CenterCrop((384, 384)),
+    ]
+)
+
+def get_transform(model_key: str):
+    """Return the correct preprocessing transform for the model."""
+    if model_key == "z3d_convnext":
+        return TRANSFORM_NO_MEAN
+    return TRANSFORM
 # ╰────────────────────────────────────────────╯
 
 # ╭──────────── Tags & helpers ─────────────╮
@@ -552,13 +570,13 @@ def debug_show_patch_coords(model, *, img_size=384, square=216):
 
 
 # 1️⃣ get_cam_array  ───────────────────────────────────────────
-def get_cam_array(img: Image.Image, tag: str, model, tag_to_idx) -> np.ndarray:
+def get_cam_array(img: Image.Image, tag: str, model, tag_to_idx, model_key: str):
     dev = next(model.parameters()).device
     idx = tag_to_idx.get(tag)
     if idx is None:
         return np.zeros((1, 1))
 
-    t = TRANSFORM(img.convert("RGBA")).unsqueeze(0).to(dev).requires_grad_(True)
+    t = get_transform(model_key)(img.convert("RGBA")).unsqueeze(0).to(dev).requires_grad_(True)
 
     acts, grads = {}, {}
     def fwd(_, __, o): acts["v"] = o
@@ -663,14 +681,16 @@ def _extract_overlay_pixels(composite: Image.Image, background: Image.Image) -> 
 
 def grad_cam(img: Image.Image, tag: str, m: torch.nn.Module,
              tag_to_idx: dict[str, int],
-             alpha: float, thr: float = 0.2) -> Image.Image:
+             alpha: float, thr: float = 0.2,
+             model_key: str | None = None) -> Image.Image:
     """Fully matches the HuggingFace demo Grad‑CAM pipeline."""
     dev = next(m.parameters()).device
     idx = tag_to_idx.get(tag)
     if idx is None:
         return img, Image.new("RGBA", img.size, (0, 0, 0, 0))
 
-    tensor = TRANSFORM(img.convert("RGBA")).unsqueeze(0).to(dev)
+    key = model_key or getattr(m, "_registry_key", None)
+    tensor = get_transform(key if key else "")(img.convert("RGBA")).unsqueeze(0).to(dev)
 
     gradients, activations = {}, {}
 
@@ -722,7 +742,7 @@ def grad_cam_average(img: Image.Image, tag: str, model_keys, alpha, thr=0.2):
             continue
         model = load_model(k, dev)
         _, tag_map = load_tags(k)
-        _, ov = grad_cam(img, tag, model, tag_map, alpha=alpha, thr=thr)  # we need only ov
+        _, ov = grad_cam(img, tag, model, tag_map, alpha=alpha, thr=thr, model_key=k)  # we need only ov
         overlays.append(np.asarray(ov, dtype=np.float32) / 255.0)
 
     if not overlays:
@@ -750,9 +770,9 @@ def grad_cam_average(img: Image.Image, tag: str, model_keys, alpha, thr=0.2):
 # safe_cam() – returns a 2-D numpy array for one model
 # -----------------------------------------------------------
 # 2️⃣ _safe_cam  ───────────────────────────────────────────────
-def _safe_cam(img: Image.Image, tag: str, model, idx: int):
+def _safe_cam(img: Image.Image, tag: str, model, idx: int, model_key: str):
     dev = next(model.parameters()).device
-    t = TRANSFORM(img.convert("RGBA")).unsqueeze(0).to(dev).requires_grad_(True)
+    t = get_transform(model_key)(img.convert("RGBA")).unsqueeze(0).to(dev).requires_grad_(True)
 
     acts, grads = {}, {}
     def fwd(_, __, o): acts["v"] = o
@@ -800,7 +820,7 @@ def grad_cam_multi(event: gr.SelectData, img, model_keys, alpha, thr):
         idx = tag_map.get(tag_str)
         if idx is None:
             continue
-        cams.append(_safe_cam(img, tag_str, m, idx))
+        cams.append(_safe_cam(img, tag_str, m, idx, k))
 
     if not cams:
         return img, {}
@@ -831,8 +851,8 @@ def worker_loop(dev_key, q, model_keys, thr, out_root,
             return
         try:
             img = Image.open(p).convert("RGBA")
-            t   = TRANSFORM(img).unsqueeze(0).to(dev)
             for k, m in models.items():
+                t = get_transform(k)(img).unsqueeze(0).to(dev)
                 tag_str, _ = classify_tensor(
                     t,
                     m,
@@ -1113,7 +1133,7 @@ with demo:
             dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
             m   = load_model(k, dev)
             tags_list, _ = load_tags(k)
-            t   = TRANSFORM(img.convert("RGBA")).unsqueeze(0).to(dev)
+            t   = get_transform(k)(img.convert("RGBA")).unsqueeze(0).to(dev)
             _, sc = classify_tensor(
                 t,
                 m,
@@ -1212,7 +1232,7 @@ with demo:
             _, tag_map = load_tags(model_keys[0])
             if tag not in tag_map:
                 return img, {}
-            comp, ov = grad_cam(img, tag, m, tag_map, alpha, thr)
+            comp, ov = grad_cam(img, tag, m, tag_map, alpha, thr, model_keys[0])
         else:
             if all(tag not in load_tags(k)[1] for k in model_keys):
                 return img, {}
@@ -1245,7 +1265,7 @@ with demo:
             _, tag_map = load_tags(model_keys[0])
             if tag not in tag_map:
                 return img, {}
-            comp, ov = grad_cam(img, tag, m, tag_map, alpha, thr)
+            comp, ov = grad_cam(img, tag, m, tag_map, alpha, thr, model_keys[0])
         else:
             if all(tag not in load_tags(k)[1] for k in model_keys):
                 return img, {}
