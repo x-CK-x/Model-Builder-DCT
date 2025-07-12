@@ -987,6 +987,7 @@ with demo:
                 cam_thr  = gr.Slider(0, 1, 0.4, 0.01, label="CAM threshold",
                                      elem_classes="inferno-slider")#.4
                 cam_alpha= gr.Slider(0, 1, 0.6, 0.01, label="CAM alpha")#.6
+                cam_btn = gr.Button("Run Grad-CAM", variant="primary")
             with gr.Column():
                 thr_slider= gr.Slider(0, 1, 0.2, 0.01, label="Tag threshold")
                 tag_out   = gr.Textbox(label="Tag string")
@@ -1251,6 +1252,13 @@ with demo:
     cam_alpha.input(
         fn=handle_cam_slider,
         inputs=[cam_state, cam_alpha, cam_thr, orig_state, model_menu],  # event comes first automatically
+        outputs=[img_cam, cam_state],
+    )
+
+    # ─── explicit button to run CAM ------------------------------------------
+    cam_btn.click(
+        fn=handle_cam_slider,
+        inputs=[cam_state, cam_alpha, cam_thr, orig_state, model_menu],
         outputs=[img_cam, cam_state],
     )
 
