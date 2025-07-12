@@ -144,7 +144,9 @@ def _find_repo_tags_file(repo: str, subfolder: str | None) -> str | None:
     candidates = [f for f in files if f.lower().endswith(patterns)]
     if subfolder:
         sub = subfolder.strip("/") + "/"
-        candidates = [f for f in candidates if f.startswith(sub)]
+        sub_candidates = [f for f in candidates if f.startswith(sub)]
+        if sub_candidates:
+            candidates = sub_candidates
     # Prefer files containing 'tag' in the name
     for f in candidates:
         if "tag" in Path(f).name.lower():
@@ -340,6 +342,8 @@ def load_model(key: str, device: torch.device, progress: gr.Progress | None = No
                         )
                     except EntryNotFoundError:
                         alt_path = _find_repo_model_file(spec["repo"], sub_remote)
+                        if not alt_path:
+                            alt_path = _find_repo_model_file(spec["repo"], None)
                         if alt_path:
                             hf_hub_download(
                                 repo_id=spec["repo"],
@@ -548,6 +552,8 @@ def load_tags(model_key: str) -> tuple[list[str], dict[str, int]]:
                         continue
                 if not downloaded:
                     alt_path = _find_repo_tags_file(spec["repo"], sub_remote)
+                    if not alt_path:
+                        alt_path = _find_repo_tags_file(spec["repo"], None)
                     if not alt_path:
                         raise
                     hf_hub_download(
