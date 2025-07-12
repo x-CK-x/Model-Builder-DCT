@@ -453,6 +453,13 @@ TRANSFORM = transforms.Compose(
 )
 
 
+class BGR(torch.nn.Module):
+    """Swap channels from RGB to BGR for models trained with OpenCV."""
+
+    def forward(self, tensor: torch.Tensor) -> torch.Tensor:  # type: ignore[override]
+        return tensor[[2, 1, 0], ...]
+
+
 # Special preprocessing for the Z3D ConvNeXt model based on the official
 # implementation: pad the image to square with a white background before
 # resizing, keep raw pixel values, and convert to BGR.
