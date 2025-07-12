@@ -59,7 +59,7 @@
   },
   "efficientnetv2_m_8035": {
     "repo": "Thouph/experimental_efficientnetv2_m_8035",
-    "subfolder": "",
+    "subfolder": "efficientnetv2_m_8035",
     "filename": "model.onnx",
     "timm_id": "",
     "num_classes": 8035,
