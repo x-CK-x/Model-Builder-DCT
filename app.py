@@ -132,6 +132,25 @@ def _find_repo_model_file(repo: str, subfolder: str | None) -> str | None:
                 return f
     return candidates[0] if candidates else None
 
+def _find_repo_tags_file(repo: str, subfolder: str | None) -> str | None:
+    """Return a tags filename from a Hugging Face repo if present."""
+    patterns = (".json", ".csv")
+    if HfApi is None:
+        return None
+    try:
+        files = HfApi().list_repo_files(repo)
+    except Exception:
+        return None
+    candidates = [f for f in files if f.lower().endswith(patterns)]
+    if subfolder:
+        sub = subfolder.strip("/") + "/"
+        candidates = [f for f in candidates if f.startswith(sub)]
+    # Prefer files containing 'tag' in the name
+    for f in candidates:
+        if "tag" in Path(f).name.lower():
+            return f
+    return candidates[0] if candidates else None
+
 # ────────────── Caption model setup ──────────────
 CAPTION_REPO = "fancyfeast/llama-joycaption-beta-one-hf-llava"
 CAPTION_CACHE = Path.home() / ".cache" / "joycaption"
@@ -510,18 +529,38 @@ def load_tags(model_key: str) -> tuple[list[str], dict[str, int]]:
                     local_dir=MODELS_DIR,
                 )
             except EntryNotFoundError:
-                try:
+                downloaded = False
+                for alt in (
+                    f"{spec['subfolder']}/{fname}" if spec.get("subfolder") else None,
+                    fname,
+                ):
+                    if not alt:
+                        continue
+                    try:
+                        hf_hub_download(
+                            repo_id=spec["repo"],
+                            filename=alt,
+                            local_dir=MODELS_DIR,
+                        )
+                        downloaded = True
+                        break
+                    except EntryNotFoundError:
+                        continue
+                if not downloaded:
+                    alt_path = _find_repo_tags_file(spec["repo"], sub_remote)
+                    if not alt_path:
+                        raise
                     hf_hub_download(
                         repo_id=spec["repo"],
-                        filename=f"{spec['subfolder']}/{fname}",
+                        filename=alt_path,
                         local_dir=MODELS_DIR,
                     )
-                except EntryNotFoundError:
-                    hf_hub_download(
-                        repo_id=spec["repo"],
-                        filename=fname,
-                        local_dir=MODELS_DIR,
-                    )
+                    alt_local = MODELS_DIR / alt_path
+                    new_local = MODELS_DIR / (spec.get("subfolder") or model_key) / Path(alt_path).name
+                    if alt_local.exists() and not new_local.exists():
+                        new_local.parent.mkdir(parents=True, exist_ok=True)
+                        alt_local.rename(new_local)
+                    path = new_local
         elif spec.get("urls"):
             for url in spec["urls"]:
                 dest = MODELS_DIR / url.split("/")[-1]
