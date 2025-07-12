@@ -452,13 +452,16 @@ TRANSFORM = transforms.Compose(
     ]
 )
 
-# Normalization-free version for models that don't expect zero-centered inputs
-TRANSFORM_NO_MEAN = transforms.Compose(
+
+# Special preprocessing for the Z3D ConvNeXt model based on the official
+# implementation: pad the image to square with a white background before
+# resizing, keep raw pixel values, and convert to BGR.
+TRANSFORM_Z3D = transforms.Compose(
     [
-        Fit((384, 384)),
+        Fit((384, 384), pad=255),
         transforms.ToTensor(),
-        CompositeAlpha(0.5),
-        transforms.CenterCrop((384, 384)),
+        CompositeAlpha(1.0),
+        BGR(),
     ]
 )
 
@@ -471,10 +474,9 @@ class BGR(torch.nn.Module):
 def get_transform(model_key: str):
     """Return the correct preprocessing transform for the model."""
     if model_key == "z3d_convnext":
-        base = TRANSFORM_NO_MEAN
-    else:
-        base = TRANSFORM
-    if model_key in {"z3d_convnext", "eva02_vit_8046"}:
+        return TRANSFORM_Z3D
+    base = TRANSFORM
+    if model_key == "eva02_vit_8046":
         return transforms.Compose([*base.transforms, BGR()])
     return base
 # ╰────────────────────────────────────────────╯
