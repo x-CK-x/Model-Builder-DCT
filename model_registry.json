@@ -21,17 +21,6 @@
     "supports_cam": true,
     "backend": "pytorch"
   },
-  "pilot2-2": {
-    "repo": "RedRocket/JointTaggerProject",
-    "subfolder": "JTP_PILOT2_2",
-    "filename": "JTP_PILOT2_2-e3-vit_so400m_patch14_siglip_384.safetensors",
-    "timm_id": "vit_so400m_patch14_siglip_384.webli",
-    "num_classes": 9083,
-    "tags_file": "tags.json",
-    "head_type": "gated",
-    "supports_cam": true,
-    "backend": "pytorch"
-  },
   "z3d_convnext": {
     "repo": "",
     "urls": [
