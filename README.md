@@ -81,3 +81,8 @@ Approximate GPU memory requirements for the built-in models. Values assume 16‑
 | MiniGPT-4 | ~16 |
 | Kosmos-2 | ~12 |
 | OpenFlamingo | ~18 |
+
+When you select a different caption model in the UI, the previous model is
+unloaded automatically. If you still hit CUDA out-of-memory errors after
+switching models, the new model likely requires more VRAM than is available on a
+single GPU—enable multiple GPUs in the interface or choose a smaller model.

@@ -214,6 +214,8 @@ def load_caption_model(repo: str, device: torch.device, hf_token: str | None = N
     key = (repo, str(device))
     if key in _caption_cache:
         return _caption_cache[key]
+    # unload any previously cached models so only one caption model stays in memory
+    unload_caption_models()
     if hf_token:
         from huggingface_hub import login
         login(hf_token, add_to_git_credential=True)
