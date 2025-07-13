@@ -24,7 +24,10 @@ All features here will be integrated into the data curation tool.
 - options to select multiple models to run at the same time over the same specified data
 - options combine results with models selected
 - options to run [classification, grad_cam visualization] tasks
-- JoyCaptioner tab for single image or batch captioning with prompt customization
+- Captioner tab for single image or batch captioning with prompt customization
+  and a dropdown to select different VLM models (JoyCaptioner, LLaVA, Qwen-VL,
+  BLIP‑2, InstructBLIP, MiniGPT‑4, Kosmos‑2, OpenFlamingo). Optional Hugging
+  Face token input allows downloading gated models.
 - supports gpu & cpu run options; all compute options can be enabled in batch mode for higher efficiency (using a forkjoin pool & a thread-safe img queue)
 
 ### Features to be implemented:
@@ -33,7 +36,7 @@ All features here will be integrated into the data curation tool.
 |---|---|---|
 | [X] | Automatic installation of miniconda (package-manager) for the user, built into the batch script; 1-time install | 1 |
 | [X] | Linux/MacOS support; as a shell script | 2 |
-| [X] | Captioning Models (JoyCaptioner) | 3 |
+| [X] | Captioning Models (multiple VLMs) | 3 |
 | [X] | API Access Captioning Models | 4 |
 | [X] | Tag Cleaning/Pruning Utility | 5 |
 | [X] | Full Pipeline Automation of Data Prep for specific set of model types (Diffusion/LLM LoRAs, classifiers, et al.) | 6 |
