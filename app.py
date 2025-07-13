@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import copy
-import os, re, queue, threading, zipfile
+import os, re, queue, threading, zipfile, time
 from pathlib import Path
 from typing import Tuple, Dict, List, Generator
 
@@ -23,6 +23,8 @@ import torch.nn.functional as F
 import timm, safetensors.torch, gradio as gr
 import onnxruntime as ort
 from huggingface_hub import hf_hub_download
+import cv2
+import numpy as np
 try:
     from huggingface_hub import HfApi
 except Exception:
@@ -460,34 +462,45 @@ class BGR(torch.nn.Module):
         return tensor[[2, 1, 0], ...]
 
 
-# Special preprocessing for the Z3D ConvNeXt model based on the official
-# implementation: pad the image to square with a white background before
-# resizing, keep raw pixel values, and convert to BGR.
-def _make_z3d_transform(size: tuple[int, int]) -> transforms.Compose:
-    """Create the preprocessing pipeline for the Z3D ConvNeXt model."""
-    return transforms.Compose(
-        [
-            Fit(size, pad=255),
-            transforms.ToTensor(),
-            CompositeAlpha(1.0),
-            BGR(),
-        ]
-    )
+class OpenCVPadResize(torch.nn.Module):
+    """Pad to square with white background and resize using OpenCV."""
 
-TRANSFORM_Z3D = _make_z3d_transform((448, 448))
+    def __init__(self, size: int):
+        super().__init__()
+        self.size = size
 
-class BGR(torch.nn.Module):
-    """Swap channels from RGB to BGR for models trained with OpenCV."""
+    def forward(self, img: Image.Image) -> torch.Tensor:  # type: ignore[override]
+        arr = np.array(img.convert("RGB"))
+        arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+        h, w = arr.shape[:2]
+        max_len = max(h, w)
+        pad_x = max_len - w
+        pad_y = max_len - h
+        arr = np.pad(
+            arr,
+            ((pad_y // 2, pad_y - pad_y // 2), (pad_x // 2, pad_x - pad_x // 2), (0, 0)),
+            mode="constant",
+            constant_values=255,
+        )
+        interp = cv2.INTER_AREA if max_len > self.size else cv2.INTER_LANCZOS4
+        arr = cv2.resize(arr, (self.size, self.size), interpolation=interp)
+        return torch.from_numpy(arr.astype(np.float32)).permute(2, 0, 1)
 
-    def forward(self, tensor: torch.Tensor) -> torch.Tensor:  # type: ignore[override]
-        return tensor[[2, 1, 0], ...]
+
+# OpenCV-based preprocessing for the Z3D ConvNeXt model following the data
+# curation tool implementation. The image is padded to a square with a white
+# background, resized to ``size`` and returned as BGR float32 values.
+def _make_z3d_transform(size: int) -> torch.nn.Module:
+    return OpenCVPadResize(size)
+
+TRANSFORM_Z3D = _make_z3d_transform(448)
 
 def get_transform(model_key: str):
     """Return the correct preprocessing transform for the model."""
     if model_key == "z3d_convnext":
         spec = REG.get(model_key, {})
-        size = tuple(spec.get("input_dims", [448, 448]))
-        return _make_z3d_transform(size) if size != (448, 448) else TRANSFORM_Z3D
+        size = int(spec.get("input_dims", [448, 448])[0])
+        return _make_z3d_transform(size) if size != 448 else TRANSFORM_Z3D
     base = TRANSFORM
     if model_key == "eva02_vit_8046":
         return transforms.Compose([*base.transforms, BGR()])
