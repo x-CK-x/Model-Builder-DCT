@@ -498,7 +498,7 @@ def get_transform(model_key: str):
 _TAGS: dict[str, list[str]] = {}
 _TAG_TO_IDX: dict[str, dict[str, int]] = {}
 
-def _parse_tags_file(path: Path, *, column: int = 0) -> tuple[list[str], dict[str, int]]:
+def _parse_tags_file(path: Path, *, column: int = 0, skip_first_line: bool = False) -> tuple[list[str], dict[str, int]]:
     """Return (tags_list, tag_to_idx) for ``path`` supporting JSON or CSV."""
     if path.suffix.lower() == ".json":
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -520,11 +520,14 @@ def _parse_tags_file(path: Path, *, column: int = 0) -> tuple[list[str], dict[st
         with open(path, newline="", encoding="utf-8") as f:
             reader = csv.reader(f)
             header = next(reader, None)
-            if header and any(h.lower() in {"name", "tag", "tags"} for h in header) and column == 0:
-                idx = next(i for i, h in enumerate(header) if h.lower() in {"name", "tag", "tags"})
+            if not skip_first_line:
+                if header and any(h.lower() in {"name", "tag", "tags"} for h in header) and column == 0:
+                    idx = next(i for i, h in enumerate(header) if h.lower() in {"name", "tag", "tags"})
+                else:
+                    if header and column < len(header):
+                        tags.append(header[column])
+                    idx = column
             else:
-                if header and column < len(header):
-                    tags.append(header[column])
                 idx = column
             for row in reader:
                 if len(row) > idx:
@@ -606,7 +609,8 @@ def load_tags(model_key: str) -> tuple[list[str], dict[str, int]]:
             alt.rename(path)
 
     column = int(spec.get("use_column_number", 0))
-    tags, mapping = _parse_tags_file(path, column=column)
+    skip = bool(spec.get("skip_first_line", False))
+    tags, mapping = _parse_tags_file(path, column=column, skip_first_line=skip)
     _TAGS[model_key] = tags
     _TAG_TO_IDX[model_key] = mapping
     return tags, mapping

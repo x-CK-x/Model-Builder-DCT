@@ -41,7 +41,8 @@
     "use_mean_norm": false,
     "use_extend_output_dims": false,
     "tags_csv_format": true,
-    "use_column_number": 1
+    "use_column_number": 1,
+    "skip_first_line": true
   },
   "eva02_clip_7704": {
     "repo": "Thouph/eva02-clip-vit-large-7704",
