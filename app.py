@@ -1436,12 +1436,15 @@ with demo:
             return img, {}
 
         if len(model_keys) == 1:
+            key = model_keys[0]
+            if not REG.get(key, {}).get("supports_cam", True):
+                return img, {}
             dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-            m = load_model(model_keys[0], dev)
-            _, tag_map = load_tags(model_keys[0])
+            m = load_model(key, dev)
+            _, tag_map = load_tags(key)
             if tag not in tag_map:
                 return img, {}
-            comp, ov = grad_cam(img, tag, m, tag_map, alpha, thr, model_keys[0])
+            comp, ov = grad_cam(img, tag, m, tag_map, alpha, thr, key)
         else:
             if all(tag not in load_tags(k)[1] for k in model_keys):
                 return img, {}
@@ -1469,12 +1472,15 @@ with demo:
             return img, {}
 
         if len(model_keys) == 1:
+            key = model_keys[0]
+            if not REG.get(key, {}).get("supports_cam", True):
+                return img, {}
             dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-            m = load_model(model_keys[0], dev)
-            _, tag_map = load_tags(model_keys[0])
+            m = load_model(key, dev)
+            _, tag_map = load_tags(key)
             if tag not in tag_map:
                 return img, {}
-            comp, ov = grad_cam(img, tag, m, tag_map, alpha, thr, model_keys[0])
+            comp, ov = grad_cam(img, tag, m, tag_map, alpha, thr, key)
         else:
             if all(tag not in load_tags(k)[1] for k in model_keys):
                 return img, {}
