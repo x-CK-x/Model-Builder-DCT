@@ -51,3 +51,6 @@ Credits for current model development/options:
   BGR channel order. Mean normalization is **not** applied. The accompanying
   `tags.csv` includes a header row (`id,name,category,post_count`) which is
   skipped automatically.
+- **eva02_clip_7704**: uses CLIP-style normalization (`mean=[0.485,0.456,0.406]`,
+  `std=[0.229,0.224,0.225]`) and requires three placeholder tags (`placeholder0`
+  – `placeholder2`) appended after loading `tags.json`.

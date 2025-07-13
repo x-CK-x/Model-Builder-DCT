@@ -454,6 +454,16 @@ TRANSFORM = transforms.Compose(
     ]
 )
 
+# CLIP-style preprocessing for eva02_clip_7704
+TRANSFORM_CLIP = transforms.Compose(
+    [
+        transforms.Resize((384, 384)),
+        transforms.ToTensor(),
+        CompositeAlpha(0.5),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+    ]
+)
+
 
 class BGR(torch.nn.Module):
     """Swap channels from RGB to BGR for models trained with OpenCV."""
@@ -501,6 +511,8 @@ def get_transform(model_key: str):
         spec = REG.get(model_key, {})
         size = int(spec.get("input_dims", [448, 448])[0])
         return _make_z3d_transform(size) if size != 448 else TRANSFORM_Z3D
+    if model_key == "eva02_clip_7704":
+        return TRANSFORM_CLIP
     base = TRANSFORM
     if model_key == "eva02_vit_8046":
         return transforms.Compose([*base.transforms, BGR()])
@@ -624,6 +636,12 @@ def load_tags(model_key: str) -> tuple[list[str], dict[str, int]]:
     column = int(spec.get("use_column_number", 0))
     skip = bool(spec.get("skip_first_line", False))
     tags, mapping = _parse_tags_file(path, column=column, skip_first_line=skip)
+    if model_key == "eva02_clip_7704":
+        placeholders = [f"placeholder{i}" for i in range(3)]
+        if len(tags) + len(placeholders) == spec.get("num_classes", len(tags)):
+            tags.extend(placeholders)
+            for i, p in enumerate(placeholders, start=len(mapping)):
+                mapping[p] = i
     _TAGS[model_key] = tags
     _TAG_TO_IDX[model_key] = mapping
     return tags, mapping
