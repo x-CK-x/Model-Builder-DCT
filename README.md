@@ -24,7 +24,10 @@ All features here will be integrated into the data curation tool.
 - options to select multiple models to run at the same time over the same specified data
 - options combine results with models selected
 - options to run [classification, grad_cam visualization] tasks
-- JoyCaptioner tab for single image or batch captioning with prompt customization
+- Captioner tab for single image or batch captioning with prompt customization
+  and a dropdown to select different VLM models (JoyCaptioner, LLaVA, Qwen-VL,
+  BLIP‑2, InstructBLIP, MiniGPT‑4, Kosmos‑2, OpenFlamingo). Optional Hugging
+  Face token input allows downloading gated models.
 - supports gpu & cpu run options; all compute options can be enabled in batch mode for higher efficiency (using a forkjoin pool & a thread-safe img queue)
 
 ### Features to be implemented:
@@ -33,7 +36,7 @@ All features here will be integrated into the data curation tool.
 |---|---|---|
 | [X] | Automatic installation of miniconda (package-manager) for the user, built into the batch script; 1-time install | 1 |
 | [X] | Linux/MacOS support; as a shell script | 2 |
-| [X] | Captioning Models (JoyCaptioner) | 3 |
+| [X] | Captioning Models (multiple VLMs) | 3 |
 | [X] | API Access Captioning Models | 4 |
 | [X] | Tag Cleaning/Pruning Utility | 5 |
 | [X] | Full Pipeline Automation of Data Prep for specific set of model types (Diffusion/LLM LoRAs, classifiers, et al.) | 6 |
@@ -54,3 +57,27 @@ Credits for current model development/options:
 - **eva02_clip_7704**: uses CLIP-style normalization (`mean=[0.485,0.456,0.406]`,
   `std=[0.229,0.224,0.225]`) and requires three placeholder tags (`placeholder0`
   – `placeholder2`) appended after loading `tags.json`.
+
+### VRAM usage
+
+Approximate GPU memory requirements for the built-in models. Values assume 16‑bit weights; quantized checkpoints will need less memory. If the estimate exceeds your single‑GPU VRAM, enable multiple GPUs in the interface so the model can be sharded.
+
+| Classifier model | VRAM (GB) |
+|---|---|
+| pilot2 | ~6 |
+| pilot1 | ~6 |
+| z3d_convnext | ~8 |
+| eva02_clip_7704 | ~5 |
+| eva02_vit_8046 | ~5 |
+| efficientnetv2_m_8035 | ~5 |
+
+| Caption model | VRAM (GB) |
+|---|---|
+| JoyCaptioner | ~14 |
+| LLaVA-1.5 | ~14 |
+| Qwen-VL | ~16 |
+| BLIP2 | ~22 |
+| InstructBLIP | ~16 |
+| MiniGPT-4 | ~16 |
+| Kosmos-2 | ~12 |
+| OpenFlamingo | ~18 |
