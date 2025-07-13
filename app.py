@@ -924,6 +924,8 @@ def grad_cam(img: Image.Image, tag: str, m: torch.nn.Module,
         P = cam_1d.numel()
         h, w_ = _best_grid(P)                       # 27×27 for ViT‑384, 24×48 for SigLIP, etc.
         cam = cam_1d.reshape(h, w_).cpu().numpy()
+        cam -= cam.min()
+        cam /= cam.max() + 1e-8
 
     h1.remove(); h2.remove()
 
