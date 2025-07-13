@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import copy
-import os, re, queue, threading, zipfile, time
+import os, re, queue, threading, zipfile, time, gc
 from pathlib import Path
 from typing import Tuple, Dict, List, Generator
 
@@ -162,6 +162,28 @@ CAPTION_CACHE.mkdir(parents=True, exist_ok=True)
 
 _caption_cache: dict[str, LlavaForConditionalGeneration] = {}
 
+def unload_classification_models() -> None:
+    """Remove all classification models from cache and clear VRAM."""
+    for m in list(_model_cache.values()):
+        try:
+            del m
+        except Exception:
+            pass
+    _model_cache.clear()
+    torch.cuda.empty_cache()
+    gc.collect()
+
+def unload_caption_models() -> None:
+    """Remove cached caption models to free memory."""
+    for m in list(_caption_cache.values()):
+        try:
+            del m
+        except Exception:
+            pass
+    _caption_cache.clear()
+    torch.cuda.empty_cache()
+    gc.collect()
+
 def load_caption_model(device: torch.device) -> LlavaForConditionalGeneration:
     key = str(device)
     if key in _caption_cache:
@@ -287,6 +309,7 @@ def caption_single(img: Image.Image, caption_type: str, caption_length: str | in
                    devices: list[str]):
     if img is None:
         return ""
+    unload_classification_models()
     device = _pick_device(devices)
     prompt = build_prompt(caption_type, caption_length, extra_opts, name_field)
     return caption_once(img, prompt, temperature, top_p, max_new_tokens, device)
@@ -924,12 +947,15 @@ def grad_cam(img: Image.Image, tag: str, m: torch.nn.Module,
         P = cam_1d.numel()
         h, w_ = _best_grid(P)                       # 27×27 for ViT‑384, 24×48 for SigLIP, etc.
         cam = cam_1d.reshape(h, w_).cpu().numpy()
+        cam -= cam.min()
+        cam /= cam.max() + 1e-8
 
     h1.remove(); h2.remove()
 
-    overlay = create_cam_visualization_pil(img, cam, alpha=alpha, vis_threshold=thr)
+    # Create RGBA heat‑map overlay then composite it over the source image
+    overlay = _cam_to_overlay(cam, img, alpha=alpha, thr=thr)
     comp    = Image.alpha_composite(img.convert("RGBA"), overlay)
-    return comp, overlay             # ← second result is the pure heat-map RGBA
+    return comp, overlay             # second result is the pure heat-map RGBA
 # ╰─────────────────────────────────────╯
 
 
@@ -943,13 +969,18 @@ def grad_cam_average(img: Image.Image, tag: str, model_keys, alpha, thr=0.2):
     dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     overlays = []
 
+    unsupported = []
     for k in model_keys:
         if not REG[k].get("supports_cam", True):
+            unsupported.append(k)
             continue
         model = load_model(k, dev)
         _, tag_map = load_tags(k)
         _, ov = grad_cam(img, tag, model, tag_map, alpha=alpha, thr=thr, model_key=k)  # we need only ov
         overlays.append(np.asarray(ov, dtype=np.float32) / 255.0)
+
+    if unsupported:
+        gr.Info(f"Grad-CAM not supported for: {', '.join(unsupported)}")
 
     if not overlays:
         return img
@@ -1047,6 +1078,7 @@ def grad_cam_multi(event: gr.SelectData, img, model_keys, alpha, thr):
 # ╭──────────── Batch worker ─────────────╮
 def worker_loop(dev_key, q, model_keys, thr, out_root,
                 total, counter, lock, progress):
+    unload_caption_models()
     dev    = torch.device(dev_key)
     models = {k: load_model(k, dev) for k in model_keys}
     tag_lists = {k: load_tags(k)[0] for k in model_keys}
@@ -1084,6 +1116,7 @@ IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
 
 def batch_tag(folder, thr, model_keys, devices, cpu_cores,
               progress=gr.Progress(track_tqdm=True)):
+    unload_caption_models()
     update_config("classifier", models=model_keys)
     if not folder:
         yield "❌ No folder provided."; return
@@ -1140,6 +1173,7 @@ def batch_caption(folder, caption_type, caption_length, extra_opts, name_field,
                   progress=gr.Progress(track_tqdm=True)):
     if not folder:
         yield "❌ No folder provided."; return
+    unload_classification_models()
     in_dir = Path(folder).expanduser()
     if not in_dir.is_dir():
         yield f"❌ Not a directory: {in_dir}"; return
@@ -1329,6 +1363,7 @@ with demo:
 
     # ─── Single-image aggregation over selected models ──────────────────────
     def single(img, thr, model_keys):
+        unload_caption_models()
         update_config("classifier", models=model_keys)
         if img is None:
             return "", {}, {}, img
@@ -1425,6 +1460,7 @@ with demo:
                          thr: float,
                          img: Image.Image,
                          model_keys: list[str]):
+        unload_caption_models()
         if not event:
             return img, {}
         tag = event.value
@@ -1433,16 +1469,24 @@ with demo:
             return img, {}
 
         if len(model_keys) == 1:
+            key = model_keys[0]
+            if not REG.get(key, {}).get("supports_cam", True):
+                gr.Info(f"Grad-CAM not supported for model {key}")
+                return img, {}
             dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-            m = load_model(model_keys[0], dev)
-            _, tag_map = load_tags(model_keys[0])
+            m = load_model(key, dev)
+            _, tag_map = load_tags(key)
             if tag not in tag_map:
                 return img, {}
-            comp, ov = grad_cam(img, tag, m, tag_map, alpha, thr, model_keys[0])
+            comp, ov = grad_cam(img, tag, m, tag_map, alpha, thr, key)
         else:
-            if all(tag not in load_tags(k)[1] for k in model_keys):
+            supported = [k for k in model_keys if REG.get(k, {}).get("supports_cam", True)]
+            unsupported = [k for k in model_keys if k not in supported]
+            if unsupported:
+                gr.Info(f"Grad-CAM not supported for: {', '.join(unsupported)}")
+            if not supported or all(tag not in load_tags(k)[1] for k in supported):
                 return img, {}
-            comp = grad_cam_average(img, tag, model_keys, alpha, thr)
+            comp = grad_cam_average(img, tag, supported, alpha, thr)
 
         return comp, {"tag": tag}
 
@@ -1458,6 +1502,7 @@ with demo:
         multi-model averaging (grad_cam_average), depending on how many
         models are selected in the dropdown.
         """
+        unload_caption_models()
         if not tag:
             return img, {}
         tag = tag["tag"]
@@ -1466,16 +1511,24 @@ with demo:
             return img, {}
 
         if len(model_keys) == 1:
+            key = model_keys[0]
+            if not REG.get(key, {}).get("supports_cam", True):
+                gr.Info(f"Grad-CAM not supported for model {key}")
+                return img, {}
             dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-            m = load_model(model_keys[0], dev)
-            _, tag_map = load_tags(model_keys[0])
+            m = load_model(key, dev)
+            _, tag_map = load_tags(key)
             if tag not in tag_map:
                 return img, {}
-            comp, ov = grad_cam(img, tag, m, tag_map, alpha, thr, model_keys[0])
+            comp, ov = grad_cam(img, tag, m, tag_map, alpha, thr, key)
         else:
-            if all(tag not in load_tags(k)[1] for k in model_keys):
+            supported = [k for k in model_keys if REG.get(k, {}).get("supports_cam", True)]
+            unsupported = [k for k in model_keys if k not in supported]
+            if unsupported:
+                gr.Info(f"Grad-CAM not supported for: {', '.join(unsupported)}")
+            if not supported or all(tag not in load_tags(k)[1] for k in supported):
                 return img, {}
-            comp = grad_cam_average(img, tag, model_keys, alpha, thr)
+            comp = grad_cam_average(img, tag, supported, alpha, thr)
 
         return comp, {"tag": tag}
 
