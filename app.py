@@ -657,12 +657,17 @@ def classify_tensor(
                     np_input = arr.numpy()
             else:
                 np_input = arr.numpy()
+
             out = m.run([output_name], {input_name: np_input})[0]
             logits = torch.from_numpy(out)[0]
-            probits = torch.sigmoid(logits)
+            if 0.0 <= float(logits.min()) and float(logits.max()) <= 1.0:
+                probits = logits
+            else:
+                probits = torch.sigmoid(logits)
         else:
             logits = m(t)[0]
             probits = torch.sigmoid(logits) if head_type == "linear" else logits
+
         vals, idxs = probits.cpu().topk(min(250, len(tags)))
     sc = {tags[i.item()]: v.item() for i, v in zip(idxs, vals) if i.item() < len(tags)}
     filt = {k: v for k, v in sc.items() if v > thr}
