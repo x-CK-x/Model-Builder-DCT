@@ -924,12 +924,15 @@ def grad_cam(img: Image.Image, tag: str, m: torch.nn.Module,
         P = cam_1d.numel()
         h, w_ = _best_grid(P)                       # 27×27 for ViT‑384, 24×48 for SigLIP, etc.
         cam = cam_1d.reshape(h, w_).cpu().numpy()
+        cam -= cam.min()
+        cam /= cam.max() + 1e-8
 
     h1.remove(); h2.remove()
 
-    overlay = create_cam_visualization_pil(img, cam, alpha=alpha, vis_threshold=thr)
+    # Create RGBA heat‑map overlay then composite it over the source image
+    overlay = _cam_to_overlay(cam, img, alpha=alpha, thr=thr)
     comp    = Image.alpha_composite(img.convert("RGBA"), overlay)
-    return comp, overlay             # ← second result is the pure heat-map RGBA
+    return comp, overlay             # second result is the pure heat-map RGBA
 # ╰─────────────────────────────────────╯
 
 
@@ -1433,12 +1436,15 @@ with demo:
             return img, {}
 
         if len(model_keys) == 1:
+            key = model_keys[0]
+            if not REG.get(key, {}).get("supports_cam", True):
+                return img, {}
             dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-            m = load_model(model_keys[0], dev)
-            _, tag_map = load_tags(model_keys[0])
+            m = load_model(key, dev)
+            _, tag_map = load_tags(key)
             if tag not in tag_map:
                 return img, {}
-            comp, ov = grad_cam(img, tag, m, tag_map, alpha, thr, model_keys[0])
+            comp, ov = grad_cam(img, tag, m, tag_map, alpha, thr, key)
         else:
             if all(tag not in load_tags(k)[1] for k in model_keys):
                 return img, {}
@@ -1466,12 +1472,15 @@ with demo:
             return img, {}
 
         if len(model_keys) == 1:
+            key = model_keys[0]
+            if not REG.get(key, {}).get("supports_cam", True):
+                return img, {}
             dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-            m = load_model(model_keys[0], dev)
-            _, tag_map = load_tags(model_keys[0])
+            m = load_model(key, dev)
+            _, tag_map = load_tags(key)
             if tag not in tag_map:
                 return img, {}
-            comp, ov = grad_cam(img, tag, m, tag_map, alpha, thr, model_keys[0])
+            comp, ov = grad_cam(img, tag, m, tag_map, alpha, thr, key)
         else:
             if all(tag not in load_tags(k)[1] for k in model_keys):
                 return img, {}
