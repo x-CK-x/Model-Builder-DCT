@@ -46,6 +46,11 @@ Credits for current model development/options:
 
 ### Model-specific notes
 
-- **z3d_convnext**: this ONNX model expects raw pixel values in `[0, 1]` range.
-  Unlike the other classifiers, mean normalization is not applied during
-  preprocessing.
+- **z3d_convnext**: expects raw 0–255 pixel values. Images are padded to a
+  square with a white background using OpenCV, resized to `448×448` and kept in
+  BGR channel order. Mean normalization is **not** applied. The accompanying
+  `tags.csv` includes a header row (`id,name,category,post_count`) which is
+  skipped automatically.
+- **eva02_clip_7704**: uses CLIP-style normalization (`mean=[0.485,0.456,0.406]`,
+  `std=[0.229,0.224,0.225]`) and requires three placeholder tags (`placeholder0`
+  – `placeholder2`) appended after loading `tags.json`.
