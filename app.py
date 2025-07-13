@@ -946,13 +946,18 @@ def grad_cam_average(img: Image.Image, tag: str, model_keys, alpha, thr=0.2):
     dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     overlays = []
 
+    unsupported = []
     for k in model_keys:
         if not REG[k].get("supports_cam", True):
+            unsupported.append(k)
             continue
         model = load_model(k, dev)
         _, tag_map = load_tags(k)
         _, ov = grad_cam(img, tag, model, tag_map, alpha=alpha, thr=thr, model_key=k)  # we need only ov
         overlays.append(np.asarray(ov, dtype=np.float32) / 255.0)
+
+    if unsupported:
+        gr.Info(f"Grad-CAM not supported for: {', '.join(unsupported)}")
 
     if not overlays:
         return img
@@ -1438,6 +1443,7 @@ with demo:
         if len(model_keys) == 1:
             key = model_keys[0]
             if not REG.get(key, {}).get("supports_cam", True):
+                gr.Info(f"Grad-CAM not supported for model {key}")
                 return img, {}
             dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
             m = load_model(key, dev)
@@ -1446,9 +1452,13 @@ with demo:
                 return img, {}
             comp, ov = grad_cam(img, tag, m, tag_map, alpha, thr, key)
         else:
-            if all(tag not in load_tags(k)[1] for k in model_keys):
+            supported = [k for k in model_keys if REG.get(k, {}).get("supports_cam", True)]
+            unsupported = [k for k in model_keys if k not in supported]
+            if unsupported:
+                gr.Info(f"Grad-CAM not supported for: {', '.join(unsupported)}")
+            if not supported or all(tag not in load_tags(k)[1] for k in supported):
                 return img, {}
-            comp = grad_cam_average(img, tag, model_keys, alpha, thr)
+            comp = grad_cam_average(img, tag, supported, alpha, thr)
 
         return comp, {"tag": tag}
 
@@ -1474,6 +1484,7 @@ with demo:
         if len(model_keys) == 1:
             key = model_keys[0]
             if not REG.get(key, {}).get("supports_cam", True):
+                gr.Info(f"Grad-CAM not supported for model {key}")
                 return img, {}
             dev = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
             m = load_model(key, dev)
@@ -1482,9 +1493,13 @@ with demo:
                 return img, {}
             comp, ov = grad_cam(img, tag, m, tag_map, alpha, thr, key)
         else:
-            if all(tag not in load_tags(k)[1] for k in model_keys):
+            supported = [k for k in model_keys if REG.get(k, {}).get("supports_cam", True)]
+            unsupported = [k for k in model_keys if k not in supported]
+            if unsupported:
+                gr.Info(f"Grad-CAM not supported for: {', '.join(unsupported)}")
+            if not supported or all(tag not in load_tags(k)[1] for k in supported):
                 return img, {}
-            comp = grad_cam_average(img, tag, model_keys, alpha, thr)
+            comp = grad_cam_average(img, tag, supported, alpha, thr)
 
         return comp, {"tag": tag}
 
