@@ -312,7 +312,7 @@ def load_model(key: str, device: torch.device, progress: gr.Progress | None = No
     sub_local = spec.get("subfolder") or key
     ckpt_path = ckpt_root / sub_local / spec["filename"]
 
-    # 2️⃣ download: keep subfolder param, but local_dir = ckpt_root
+    # 2️⃣ download: place files inside the model's subfolder
     if not ckpt_path.exists():
         (ckpt_root / sub_local).mkdir(parents=True, exist_ok=True)
         tracker = progress or gr.Progress(track_tqdm=True)
@@ -325,7 +325,7 @@ def load_model(key: str, device: torch.device, progress: gr.Progress | None = No
                     repo_id=spec["repo"],
                     subfolder=sub_remote,
                     filename=spec["filename"],
-                    local_dir=ckpt_root,
+                    local_dir=ckpt_root / sub_local,
                 )
             except EntryNotFoundError:
                 alt_path = None
@@ -333,14 +333,14 @@ def load_model(key: str, device: torch.device, progress: gr.Progress | None = No
                     hf_hub_download(
                         repo_id=spec["repo"],
                         filename=f"{spec['subfolder']}/{spec['filename']}",
-                        local_dir=ckpt_root,
+                        local_dir=ckpt_root / sub_local,
                     )
                 except EntryNotFoundError:
                     try:
                         hf_hub_download(
                             repo_id=spec["repo"],
                             filename=spec["filename"],
-                            local_dir=ckpt_root,
+                            local_dir=ckpt_root / sub_local,
                         )
                     except EntryNotFoundError:
                         alt_path = _find_repo_model_file(spec["repo"], sub_remote)
@@ -350,10 +350,10 @@ def load_model(key: str, device: torch.device, progress: gr.Progress | None = No
                             hf_hub_download(
                                 repo_id=spec["repo"],
                                 filename=alt_path,
-                                local_dir=ckpt_root,
+                                local_dir=ckpt_root / sub_local,
                             )
                             ckpt_path = ckpt_root / sub_local / Path(alt_path).name
-                            dl_path = ckpt_root / alt_path
+                            dl_path = (ckpt_root / sub_local) / Path(alt_path).name
                             if dl_path.exists() and not ckpt_path.exists():
                                 ckpt_path.parent.mkdir(parents=True, exist_ok=True)
                                 dl_path.rename(ckpt_path)
@@ -362,11 +362,11 @@ def load_model(key: str, device: torch.device, progress: gr.Progress | None = No
         elif spec.get("urls"):
             for url in spec["urls"]:
                 fname = url.split("/")[-1]
-                dest = ckpt_root / fname
+                dest = ckpt_root / sub_local / fname
                 _download_file(url, dest)
-                _extract_archive(dest, ckpt_root)
+                _extract_archive(dest, ckpt_root / sub_local)
             if key == "z3d_convnext":
-                base = ckpt_root / "Z3D-E621-Convnext"
+                base = ckpt_root / sub_local / "Z3D-E621-Convnext"
                 src = base / "Z3D-E621-Convnext.onnx"
                 dst = base / "model.onnx"
                 if src.exists() and not dst.exists():
@@ -378,7 +378,7 @@ def load_model(key: str, device: torch.device, progress: gr.Progress | None = No
         else:
             raise ValueError("No download source for model")
 
-        alt = ckpt_root / spec["filename"]
+        alt = ckpt_root / sub_local / spec["filename"]
         if alt.exists() and not ckpt_path.exists():
             ckpt_path.parent.mkdir(parents=True, exist_ok=True)
             alt.rename(ckpt_path)
@@ -583,7 +583,7 @@ def load_tags(model_key: str) -> tuple[list[str], dict[str, int]]:
                     repo_id=spec["repo"],
                     subfolder=sub_remote,
                     filename=fname,
-                    local_dir=MODELS_DIR,
+                    local_dir=MODELS_DIR / (spec.get("subfolder") or model_key),
                 )
             except EntryNotFoundError:
                 downloaded = False
@@ -597,7 +597,7 @@ def load_tags(model_key: str) -> tuple[list[str], dict[str, int]]:
                         hf_hub_download(
                             repo_id=spec["repo"],
                             filename=alt,
-                            local_dir=MODELS_DIR,
+                            local_dir=MODELS_DIR / (spec.get("subfolder") or model_key),
                         )
                         downloaded = True
                         break
@@ -612,9 +612,9 @@ def load_tags(model_key: str) -> tuple[list[str], dict[str, int]]:
                     hf_hub_download(
                         repo_id=spec["repo"],
                         filename=alt_path,
-                        local_dir=MODELS_DIR,
+                        local_dir=MODELS_DIR / (spec.get("subfolder") or model_key),
                     )
-                    alt_local = MODELS_DIR / alt_path
+                    alt_local = MODELS_DIR / (spec.get("subfolder") or model_key) / alt_path
                     new_local = MODELS_DIR / (spec.get("subfolder") or model_key) / Path(alt_path).name
                     if alt_local.exists() and not new_local.exists():
                         new_local.parent.mkdir(parents=True, exist_ok=True)
@@ -622,13 +622,13 @@ def load_tags(model_key: str) -> tuple[list[str], dict[str, int]]:
                     path = new_local
         elif spec.get("urls"):
             for url in spec["urls"]:
-                dest = MODELS_DIR / url.split("/")[-1]
+                dest = MODELS_DIR / (spec.get("subfolder") or model_key) / url.split("/")[-1]
                 _download_file(url, dest)
-                _extract_archive(dest, MODELS_DIR)
+                _extract_archive(dest, MODELS_DIR / (spec.get("subfolder") or model_key))
         else:
             raise ValueError(f"No download source for tags file of {model_key}")
 
-        alt = MODELS_DIR / fname
+        alt = MODELS_DIR / (spec.get("subfolder") or model_key) / fname
         if alt.exists() and not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             alt.rename(path)
