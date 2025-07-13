@@ -57,3 +57,27 @@ Credits for current model development/options:
 - **eva02_clip_7704**: uses CLIP-style normalization (`mean=[0.485,0.456,0.406]`,
   `std=[0.229,0.224,0.225]`) and requires three placeholder tags (`placeholder0`
   – `placeholder2`) appended after loading `tags.json`.
+
+### VRAM usage
+
+Approximate GPU memory requirements for the built-in models. Values assume 16‑bit weights; quantized checkpoints will need less memory. If the estimate exceeds your single‑GPU VRAM, enable multiple GPUs in the interface so the model can be sharded.
+
+| Classifier model | VRAM (GB) |
+|---|---|
+| pilot2 | ~6 |
+| pilot1 | ~6 |
+| z3d_convnext | ~8 |
+| eva02_clip_7704 | ~5 |
+| eva02_vit_8046 | ~5 |
+| efficientnetv2_m_8035 | ~5 |
+
+| Caption model | VRAM (GB) |
+|---|---|
+| JoyCaptioner | ~14 |
+| LLaVA-1.5 | ~14 |
+| Qwen-VL | ~16 |
+| BLIP2 | ~22 |
+| InstructBLIP | ~16 |
+| MiniGPT-4 | ~16 |
+| Kosmos-2 | ~12 |
+| OpenFlamingo | ~18 |

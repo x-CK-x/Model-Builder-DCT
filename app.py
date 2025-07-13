@@ -63,6 +63,16 @@ CFG = load_config()
 CFG_CLASSIFY = CFG.get("classifier", {})
 CFG_CAPTION = CFG.get("captioner", {})
 
+# Approximate VRAM usage (GB) for available classifier models
+CLASSIFIER_VRAM = {
+    "pilot2": 6,
+    "pilot1": 6,
+    "z3d_convnext": 8,
+    "eva02_clip_7704": 5,
+    "eva02_vit_8046": 5,
+    "efficientnetv2_m_8035": 5,
+}
+
 # ╭───────────────────────── Device helpers ─────────────────────────╮
 def cuda_devices() -> list[str]:
     if not torch.cuda.is_available():
@@ -156,22 +166,22 @@ def _find_repo_tags_file(repo: str, subfolder: str | None) -> str | None:
     return candidates[0] if candidates else None
 
 # ────────────── Caption model setup ──────────────
-# Available Vision–Language models (VLMs)
+# Available Vision–Language models (VLMs) with approximate VRAM needs (GB)
 CAPTION_MODELS = {
-    "JoyCaptioner": "fancyfeast/llama-joycaption-beta-one-hf-llava",
-    "LLaVA-1.5": "llava-hf/llava-1.5-7b-hf",
-    "Qwen-VL": "Qwen/Qwen-VL",
-    "BLIP2": "Salesforce/blip2-flan-t5-xl",
-    "InstructBLIP": "Salesforce/instructblip-vicuna-7b",
-    "MiniGPT-4": "Vision-CAIR/minigpt4-vicuna-7b",
-    "Kosmos-2": "microsoft/kosmos-2-patch14-224",
-    "OpenFlamingo": "openflamingo/OpenFlamingo-9B-vitl-mpt7b",
+    "JoyCaptioner": {"repo": "fancyfeast/llama-joycaption-beta-one-hf-llava", "vram": 14},
+    "LLaVA-1.5": {"repo": "llava-hf/llava-1.5-7b-hf", "vram": 14},
+    "Qwen-VL": {"repo": "Qwen/Qwen-VL", "vram": 16},
+    "BLIP2": {"repo": "Salesforce/blip2-flan-t5-xl", "vram": 22},
+    "InstructBLIP": {"repo": "Salesforce/instructblip-vicuna-7b", "vram": 16},
+    "MiniGPT-4": {"repo": "Vision-CAIR/minigpt4-vicuna-7b", "vram": 16},
+    "Kosmos-2": {"repo": "microsoft/kosmos-2-patch14-224", "vram": 12},
+    "OpenFlamingo": {"repo": "openflamingo/OpenFlamingo-9B-vitl-mpt7b", "vram": 18},
 }
 
 DEFAULT_CAPTION_MODEL = "JoyCaptioner"
 CAPTION_MODEL = CFG_CAPTION.get("model", DEFAULT_CAPTION_MODEL)
 CAPTION_TOKEN = CFG_CAPTION.get("hf_token", "")
-CAPTION_REPO = CAPTION_MODELS.get(CAPTION_MODEL, CAPTION_MODELS[DEFAULT_CAPTION_MODEL])
+CAPTION_REPO = CAPTION_MODELS.get(CAPTION_MODEL, CAPTION_MODELS[DEFAULT_CAPTION_MODEL])["repo"]
 
 CAPTION_CACHE_BASE = Path.home() / ".cache" / "caption_models"
 CAPTION_CACHE_BASE.mkdir(parents=True, exist_ok=True)
@@ -302,6 +312,21 @@ def build_prompt(caption_type: str, caption_length: str | int, extra_options: li
 
 def toggle_name_box(selected_options: list[str]):
     return gr.update(visible=NAME_OPTION in selected_options)
+
+def update_classify_vram(models: list[str]):
+    total = sum(CLASSIFIER_VRAM.get(m, 0) for m in models)
+    msg = f"Estimated VRAM required: ~{total} GB"
+    if total > 24:
+        msg += " – enable multiple GPUs"
+    return gr.update(value=msg)
+
+def update_caption_vram(model: str):
+    info = CAPTION_MODELS.get(model, {})
+    vram = info.get("vram", 0)
+    msg = f"Estimated VRAM required: ~{vram} GB"
+    if vram > 24:
+        msg += " – enable multiple GPUs"
+    return gr.update(value=msg)
 
 def caption_once(img: Image.Image, prompt: str, temperature: float, top_p: float, max_new_tokens: int, device: torch.device,
                  repo: str = CAPTION_REPO, hf_token: str | None = None) -> str:
@@ -1239,8 +1264,9 @@ def caption_single_wrapper(img, ctype, clen, opts, name, temp, top_p, max_tok, d
         model=model,
         hf_token=token,
     )
+    repo_id = CAPTION_MODELS.get(model, {}).get("repo", model)
     return caption_single(img, ctype, clen, opts, name, temp, top_p, max_tok, dev,
-                          repo=CAPTION_MODELS.get(model, model), hf_token=token)
+                          repo=repo_id, hf_token=token)
 
 
 def batch_caption_wrapper(folder, ctype, clen, opts, name, temp, top_p, max_tok, dev, model, token):
@@ -1255,8 +1281,9 @@ def batch_caption_wrapper(folder, ctype, clen, opts, name, temp, top_p, max_tok,
         model=model,
         hf_token=token,
     )
+    repo_id = CAPTION_MODELS.get(model, {}).get("repo", model)
     yield from batch_caption(folder, ctype, clen, opts, name, temp, top_p, max_tok, dev,
-                             repo=CAPTION_MODELS.get(model, model), hf_token=token)
+                             repo=repo_id, hf_token=token)
 
 CSS = """
 .inferno-slider input[type=range]{background:linear-gradient(to right,#000004,#1b0c41,#4a0c6b,#781c6d,#a52c60,#cf4446,#ed6925,#fb9b06,#f7d13d,#fcffa4)!important}
@@ -1278,6 +1305,15 @@ with demo:
         multiselect=True,
         label="Models to run"
     )
+    _default_models = CFG_CLASSIFY.get("models", ["pilot2"])
+    if isinstance(_default_models, str):
+        _default_models = [_default_models]
+    _default_vram = sum(CLASSIFIER_VRAM.get(m, 0) for m in _default_models)
+    _msg = f"Estimated VRAM required: ~{_default_vram} GB"
+    if _default_vram > 24:
+        _msg += " – enable multiple GPUs"
+    class_vram = gr.Markdown(value=_msg)
+    model_menu.change(update_classify_vram, model_menu, class_vram)
 
     # ─── Single-image tab
     with gr.Tab("Single Image"):
@@ -1325,6 +1361,12 @@ with demo:
             choices=list(CAPTION_MODELS.keys()),
             value=CAPTION_MODEL,
             label="Caption Model")
+        cap_v = CAPTION_MODELS.get(CAPTION_MODEL, {})
+        _cap_msg = f"Estimated VRAM required: ~{cap_v.get('vram', 0)} GB"
+        if cap_v.get('vram', 0) > 24:
+            _cap_msg += " – enable multiple GPUs"
+        cap_vram = gr.Markdown(value=_cap_msg)
+        cap_model.change(update_caption_vram, cap_model, cap_vram)
         cap_token = gr.Textbox(
             label="HF token (optional)",
             type="password",
