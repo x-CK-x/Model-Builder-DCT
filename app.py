@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import copy
-import os, re, queue, threading, zipfile, time
+import os, re, queue, threading, zipfile, time, gc
 from pathlib import Path
 from typing import Tuple, Dict, List, Generator
 
@@ -162,6 +162,28 @@ CAPTION_CACHE.mkdir(parents=True, exist_ok=True)
 
 _caption_cache: dict[str, LlavaForConditionalGeneration] = {}
 
+def unload_classification_models() -> None:
+    """Remove all classification models from cache and clear VRAM."""
+    for m in list(_model_cache.values()):
+        try:
+            del m
+        except Exception:
+            pass
+    _model_cache.clear()
+    torch.cuda.empty_cache()
+    gc.collect()
+
+def unload_caption_models() -> None:
+    """Remove cached caption models to free memory."""
+    for m in list(_caption_cache.values()):
+        try:
+            del m
+        except Exception:
+            pass
+    _caption_cache.clear()
+    torch.cuda.empty_cache()
+    gc.collect()
+
 def load_caption_model(device: torch.device) -> LlavaForConditionalGeneration:
     key = str(device)
     if key in _caption_cache:
@@ -287,6 +309,7 @@ def caption_single(img: Image.Image, caption_type: str, caption_length: str | in
                    devices: list[str]):
     if img is None:
         return ""
+    unload_classification_models()
     device = _pick_device(devices)
     prompt = build_prompt(caption_type, caption_length, extra_opts, name_field)
     return caption_once(img, prompt, temperature, top_p, max_new_tokens, device)
@@ -1055,6 +1078,7 @@ def grad_cam_multi(event: gr.SelectData, img, model_keys, alpha, thr):
 # ╭──────────── Batch worker ─────────────╮
 def worker_loop(dev_key, q, model_keys, thr, out_root,
                 total, counter, lock, progress):
+    unload_caption_models()
     dev    = torch.device(dev_key)
     models = {k: load_model(k, dev) for k in model_keys}
     tag_lists = {k: load_tags(k)[0] for k in model_keys}
@@ -1092,6 +1116,7 @@ IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
 
 def batch_tag(folder, thr, model_keys, devices, cpu_cores,
               progress=gr.Progress(track_tqdm=True)):
+    unload_caption_models()
     update_config("classifier", models=model_keys)
     if not folder:
         yield "❌ No folder provided."; return
@@ -1148,6 +1173,7 @@ def batch_caption(folder, caption_type, caption_length, extra_opts, name_field,
                   progress=gr.Progress(track_tqdm=True)):
     if not folder:
         yield "❌ No folder provided."; return
+    unload_classification_models()
     in_dir = Path(folder).expanduser()
     if not in_dir.is_dir():
         yield f"❌ Not a directory: {in_dir}"; return
@@ -1337,6 +1363,7 @@ with demo:
 
     # ─── Single-image aggregation over selected models ──────────────────────
     def single(img, thr, model_keys):
+        unload_caption_models()
         update_config("classifier", models=model_keys)
         if img is None:
             return "", {}, {}, img
@@ -1433,6 +1460,7 @@ with demo:
                          thr: float,
                          img: Image.Image,
                          model_keys: list[str]):
+        unload_caption_models()
         if not event:
             return img, {}
         tag = event.value
@@ -1474,6 +1502,7 @@ with demo:
         multi-model averaging (grad_cam_average), depending on how many
         models are selected in the dropdown.
         """
+        unload_caption_models()
         if not tag:
             return img, {}
         tag = tag["tag"]
