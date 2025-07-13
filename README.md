@@ -47,5 +47,5 @@ Credits for current model development/options:
 ### Model-specific notes
 
 - **z3d_convnext**: expects raw pixel values in `[0, 1]` range. The image is
-  padded to a square with a white background, resized to `384×384`, and the
+  padded to a square with a white background, resized to `448×448`, and the
   channels are reordered to BGR. Mean normalization is **not** applied.

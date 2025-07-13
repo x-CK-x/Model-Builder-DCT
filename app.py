@@ -463,14 +463,18 @@ class BGR(torch.nn.Module):
 # Special preprocessing for the Z3D ConvNeXt model based on the official
 # implementation: pad the image to square with a white background before
 # resizing, keep raw pixel values, and convert to BGR.
-TRANSFORM_Z3D = transforms.Compose(
-    [
-        Fit((384, 384), pad=255),
-        transforms.ToTensor(),
-        CompositeAlpha(1.0),
-        BGR(),
-    ]
-)
+def _make_z3d_transform(size: tuple[int, int]) -> transforms.Compose:
+    """Create the preprocessing pipeline for the Z3D ConvNeXt model."""
+    return transforms.Compose(
+        [
+            Fit(size, pad=255),
+            transforms.ToTensor(),
+            CompositeAlpha(1.0),
+            BGR(),
+        ]
+    )
+
+TRANSFORM_Z3D = _make_z3d_transform((448, 448))
 
 class BGR(torch.nn.Module):
     """Swap channels from RGB to BGR for models trained with OpenCV."""
@@ -481,7 +485,9 @@ class BGR(torch.nn.Module):
 def get_transform(model_key: str):
     """Return the correct preprocessing transform for the model."""
     if model_key == "z3d_convnext":
-        return TRANSFORM_Z3D
+        spec = REG.get(model_key, {})
+        size = tuple(spec.get("input_dims", [448, 448]))
+        return _make_z3d_transform(size) if size != (448, 448) else TRANSFORM_Z3D
     base = TRANSFORM
     if model_key == "eva02_vit_8046":
         return transforms.Compose([*base.transforms, BGR()])
@@ -492,7 +498,7 @@ def get_transform(model_key: str):
 _TAGS: dict[str, list[str]] = {}
 _TAG_TO_IDX: dict[str, dict[str, int]] = {}
 
-def _parse_tags_file(path: Path) -> tuple[list[str], dict[str, int]]:
+def _parse_tags_file(path: Path, *, column: int = 0) -> tuple[list[str], dict[str, int]]:
     """Return (tags_list, tag_to_idx) for ``path`` supporting JSON or CSV."""
     if path.suffix.lower() == ".json":
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -514,12 +520,12 @@ def _parse_tags_file(path: Path) -> tuple[list[str], dict[str, int]]:
         with open(path, newline="", encoding="utf-8") as f:
             reader = csv.reader(f)
             header = next(reader, None)
-            if header and any(h.lower() in {"name", "tag", "tags"} for h in header):
+            if header and any(h.lower() in {"name", "tag", "tags"} for h in header) and column == 0:
                 idx = next(i for i, h in enumerate(header) if h.lower() in {"name", "tag", "tags"})
             else:
-                if header:
-                    tags.append(header[0])
-                idx = 0
+                if header and column < len(header):
+                    tags.append(header[column])
+                idx = column
             for row in reader:
                 if len(row) > idx:
                     tags.append(row[idx])
@@ -599,7 +605,8 @@ def load_tags(model_key: str) -> tuple[list[str], dict[str, int]]:
             path.parent.mkdir(parents=True, exist_ok=True)
             alt.rename(path)
 
-    tags, mapping = _parse_tags_file(path)
+    column = int(spec.get("use_column_number", 0))
+    tags, mapping = _parse_tags_file(path, column=column)
     _TAGS[model_key] = tags
     _TAG_TO_IDX[model_key] = mapping
     return tags, mapping

@@ -33,7 +33,15 @@
     "tags_file": "tags.csv",
     "head_type": "linear",
     "supports_cam": false,
-    "backend": "onnx"
+    "backend": "onnx",
+    "input_dims": [448, 448],
+    "output_layer_size": 9525,
+    "onnx_format": true,
+    "confidence_threshold": 0.2,
+    "use_mean_norm": false,
+    "use_extend_output_dims": false,
+    "tags_csv_format": true,
+    "use_column_number": 1
   },
   "eva02_clip_7704": {
     "repo": "Thouph/eva02-clip-vit-large-7704",
