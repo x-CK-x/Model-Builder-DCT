@@ -23,6 +23,24 @@ import torch.nn.functional as F
 import timm, safetensors.torch, gradio as gr
 import onnxruntime as ort
 from huggingface_hub import hf_hub_download
+try:
+    from huggingface_hub import HfApi
+except Exception:
+    HfApi = None  # pragma: no cover - old versions
+try:
+    # Available in newer versions
+    from huggingface_hub import EntryNotFoundError
+except Exception:  # pragma: no cover - maintain compatibility
+    try:
+        # Older versions expose HTTP errors under this name
+        from huggingface_hub import HfHubHTTPError as EntryNotFoundError
+    except Exception:
+        try:
+            from huggingface_hub.utils import HfHubHTTPError as EntryNotFoundError
+        except Exception:
+            class EntryNotFoundError(Exception):
+                """Fallback when huggingface_hub doesn't expose specific errors."""
+                pass
 import requests
 from tqdm import tqdm
 from transformers import (
@@ -96,6 +114,44 @@ def _extract_archive(path: Path, dest: Path):
         with zipfile.ZipFile(path, "r") as zf:
             zf.extractall(dest)
         path.unlink()
+
+def _find_repo_model_file(repo: str, subfolder: str | None) -> str | None:
+    """Return a model filename from a Hugging Face repo if present."""
+    patterns = (".onnx", ".safetensors", ".pt", ".bin")
+    if HfApi is None:
+        return None
+    try:
+        files = HfApi().list_repo_files(repo)
+    except Exception:
+        return None
+    candidates = [f for f in files if f.lower().endswith(patterns)]
+    if subfolder:
+        sub = subfolder.strip("/") + "/"
+        for f in candidates:
+            if f.startswith(sub):
+                return f
+    return candidates[0] if candidates else None
+
+def _find_repo_tags_file(repo: str, subfolder: str | None) -> str | None:
+    """Return a tags filename from a Hugging Face repo if present."""
+    patterns = (".json", ".csv")
+    if HfApi is None:
+        return None
+    try:
+        files = HfApi().list_repo_files(repo)
+    except Exception:
+        return None
+    candidates = [f for f in files if f.lower().endswith(patterns)]
+    if subfolder:
+        sub = subfolder.strip("/") + "/"
+        sub_candidates = [f for f in candidates if f.startswith(sub)]
+        if sub_candidates:
+            candidates = sub_candidates
+    # Prefer files containing 'tag' in the name
+    for f in candidates:
+        if "tag" in Path(f).name.lower():
+            return f
+    return candidates[0] if candidates else None
 
 # ────────────── Caption model setup ──────────────
 CAPTION_REPO = "fancyfeast/llama-joycaption-beta-one-hf-llava"
@@ -233,8 +289,9 @@ def caption_single(img: Image.Image, caption_type: str, caption_length: str | in
     prompt = build_prompt(caption_type, caption_length, extra_opts, name_field)
     return caption_once(img, prompt, temperature, top_p, max_new_tokens, device)
 
-def local_path(spec: dict, fname: str) -> Path:
-    return MODELS_DIR / spec["subfolder"] / fname
+def local_path(spec: dict, fname: str, key: str) -> Path:
+    sub = spec.get("subfolder", "") or key
+    return MODELS_DIR / sub / fname
 
 def load_model(key: str, device: torch.device, progress: gr.Progress | None = None):
     """
@@ -250,21 +307,56 @@ def load_model(key: str, device: torch.device, progress: gr.Progress | None = No
     # target path under ./models/<subfolder>/<filename>
     # 1️⃣ choose *root* dir once (no nested subfolder here)
     ckpt_root = MODELS_DIR  # .../models
-    ckpt_path = ckpt_root / spec["subfolder"] / spec["filename"]
+    sub_local = spec.get("subfolder") or key
+    ckpt_path = ckpt_root / sub_local / spec["filename"]
 
     # 2️⃣ download: keep subfolder param, but local_dir = ckpt_root
     if not ckpt_path.exists():
-        (ckpt_root / spec["subfolder"]).mkdir(parents=True, exist_ok=True)
+        (ckpt_root / sub_local).mkdir(parents=True, exist_ok=True)
         tracker = progress or gr.Progress(track_tqdm=True)
         tracker(0, desc=f"Downloading {key} …", total=1, unit="file")
 
         if spec.get("repo"):
-            hf_hub_download(
-                repo_id=spec["repo"],
-                subfolder=spec["subfolder"],
-                filename=spec["filename"],
-                local_dir=ckpt_root,
-            )
+            sub_remote = spec.get("subfolder") or None
+            try:
+                hf_hub_download(
+                    repo_id=spec["repo"],
+                    subfolder=sub_remote,
+                    filename=spec["filename"],
+                    local_dir=ckpt_root,
+                )
+            except EntryNotFoundError:
+                alt_path = None
+                try:
+                    hf_hub_download(
+                        repo_id=spec["repo"],
+                        filename=f"{spec['subfolder']}/{spec['filename']}",
+                        local_dir=ckpt_root,
+                    )
+                except EntryNotFoundError:
+                    try:
+                        hf_hub_download(
+                            repo_id=spec["repo"],
+                            filename=spec["filename"],
+                            local_dir=ckpt_root,
+                        )
+                    except EntryNotFoundError:
+                        alt_path = _find_repo_model_file(spec["repo"], sub_remote)
+                        if not alt_path:
+                            alt_path = _find_repo_model_file(spec["repo"], None)
+                        if alt_path:
+                            hf_hub_download(
+                                repo_id=spec["repo"],
+                                filename=alt_path,
+                                local_dir=ckpt_root,
+                            )
+                            ckpt_path = ckpt_root / sub_local / Path(alt_path).name
+                            dl_path = ckpt_root / alt_path
+                            if dl_path.exists() and not ckpt_path.exists():
+                                ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+                                dl_path.rename(ckpt_path)
+                        else:
+                            raise
         elif spec.get("urls"):
             for url in spec["urls"]:
                 fname = url.split("/")[-1]
@@ -283,6 +375,12 @@ def load_model(key: str, device: torch.device, progress: gr.Progress | None = No
                     src_csv.rename(dst_csv)
         else:
             raise ValueError("No download source for model")
+
+        alt = ckpt_root / spec["filename"]
+        if alt.exists() and not ckpt_path.exists():
+            ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+            alt.rename(ckpt_path)
+
         tracker(1)
 
     if spec.get("backend", "pytorch") == "onnx":
@@ -354,28 +452,47 @@ TRANSFORM = transforms.Compose(
     ]
 )
 
-# Normalization-free version for models that don't expect zero-centered inputs
-TRANSFORM_NO_MEAN = transforms.Compose(
-    [
-        Fit((384, 384)),
-        transforms.ToTensor(),
-        CompositeAlpha(0.5),
-        transforms.CenterCrop((384, 384)),
-    ]
-)
+
+class BGR(torch.nn.Module):
+    """Swap channels from RGB to BGR for models trained with OpenCV."""
+
+    def forward(self, tensor: torch.Tensor) -> torch.Tensor:  # type: ignore[override]
+        return tensor[[2, 1, 0], ...]
+
+
+# Special preprocessing for the Z3D ConvNeXt model based on the official
+# implementation: pad the image to square with a white background before
+# resizing, keep raw pixel values, and convert to BGR.
+def _make_z3d_transform(size: tuple[int, int]) -> transforms.Compose:
+    """Create the preprocessing pipeline for the Z3D ConvNeXt model."""
+    return transforms.Compose(
+        [
+            Fit(size, pad=255),
+            transforms.ToTensor(),
+            CompositeAlpha(1.0),
+            BGR(),
+        ]
+    )
+
+TRANSFORM_Z3D = _make_z3d_transform((448, 448))
 
 def get_transform(model_key: str):
     """Return the correct preprocessing transform for the model."""
     if model_key == "z3d_convnext":
-        return TRANSFORM_NO_MEAN
-    return TRANSFORM
+        spec = REG.get(model_key, {})
+        size = tuple(spec.get("input_dims", [448, 448]))
+        return _make_z3d_transform(size) if size != (448, 448) else TRANSFORM_Z3D
+    base = TRANSFORM
+    if model_key == "eva02_vit_8046":
+        return transforms.Compose([*base.transforms, BGR()])
+    return base
 # ╰────────────────────────────────────────────╯
 
 # ╭──────────── Tags & helpers ─────────────╮
 _TAGS: dict[str, list[str]] = {}
 _TAG_TO_IDX: dict[str, dict[str, int]] = {}
 
-def _parse_tags_file(path: Path) -> tuple[list[str], dict[str, int]]:
+def _parse_tags_file(path: Path, *, column: int = 0, skip_first_line: bool = False) -> tuple[list[str], dict[str, int]]:
     """Return (tags_list, tag_to_idx) for ``path`` supporting JSON or CSV."""
     if path.suffix.lower() == ".json":
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -397,12 +514,15 @@ def _parse_tags_file(path: Path) -> tuple[list[str], dict[str, int]]:
         with open(path, newline="", encoding="utf-8") as f:
             reader = csv.reader(f)
             header = next(reader, None)
-            if header and any(h.lower() in {"name", "tag", "tags"} for h in header):
-                idx = next(i for i, h in enumerate(header) if h.lower() in {"name", "tag", "tags"})
+            if not skip_first_line:
+                if header and any(h.lower() in {"name", "tag", "tags"} for h in header) and column == 0:
+                    idx = next(i for i, h in enumerate(header) if h.lower() in {"name", "tag", "tags"})
+                else:
+                    if header and column < len(header):
+                        tags.append(header[column])
+                    idx = column
             else:
-                if header:
-                    tags.append(header[0])
-                idx = 0
+                idx = column
             for row in reader:
                 if len(row) > idx:
                     tags.append(row[idx])
@@ -422,16 +542,53 @@ def load_tags(model_key: str) -> tuple[list[str], dict[str, int]]:
     fname = spec.get("tags_file")
     if not fname:
         raise ValueError(f"Model {model_key} missing 'tags_file'")
-    path = local_path(spec, fname)
+    path = local_path(spec, fname, model_key)
 
     if not path.exists():
         if spec.get("repo"):
-            hf_hub_download(
-                repo_id=spec["repo"],
-                subfolder=spec["subfolder"],
-                filename=fname,
-                local_dir=MODELS_DIR,
-            )
+            sub_remote = spec.get("subfolder") or None
+            try:
+                hf_hub_download(
+                    repo_id=spec["repo"],
+                    subfolder=sub_remote,
+                    filename=fname,
+                    local_dir=MODELS_DIR,
+                )
+            except EntryNotFoundError:
+                downloaded = False
+                for alt in (
+                    f"{spec['subfolder']}/{fname}" if spec.get("subfolder") else None,
+                    fname,
+                ):
+                    if not alt:
+                        continue
+                    try:
+                        hf_hub_download(
+                            repo_id=spec["repo"],
+                            filename=alt,
+                            local_dir=MODELS_DIR,
+                        )
+                        downloaded = True
+                        break
+                    except EntryNotFoundError:
+                        continue
+                if not downloaded:
+                    alt_path = _find_repo_tags_file(spec["repo"], sub_remote)
+                    if not alt_path:
+                        alt_path = _find_repo_tags_file(spec["repo"], None)
+                    if not alt_path:
+                        raise
+                    hf_hub_download(
+                        repo_id=spec["repo"],
+                        filename=alt_path,
+                        local_dir=MODELS_DIR,
+                    )
+                    alt_local = MODELS_DIR / alt_path
+                    new_local = MODELS_DIR / (spec.get("subfolder") or model_key) / Path(alt_path).name
+                    if alt_local.exists() and not new_local.exists():
+                        new_local.parent.mkdir(parents=True, exist_ok=True)
+                        alt_local.rename(new_local)
+                    path = new_local
         elif spec.get("urls"):
             for url in spec["urls"]:
                 dest = MODELS_DIR / url.split("/")[-1]
@@ -440,7 +597,14 @@ def load_tags(model_key: str) -> tuple[list[str], dict[str, int]]:
         else:
             raise ValueError(f"No download source for tags file of {model_key}")
 
-    tags, mapping = _parse_tags_file(path)
+        alt = MODELS_DIR / fname
+        if alt.exists() and not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            alt.rename(path)
+
+    column = int(spec.get("use_column_number", 0))
+    skip = bool(spec.get("skip_first_line", False))
+    tags, mapping = _parse_tags_file(path, column=column, skip_first_line=skip)
     _TAGS[model_key] = tags
     _TAG_TO_IDX[model_key] = mapping
     return tags, mapping
