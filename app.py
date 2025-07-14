@@ -461,6 +461,7 @@ def load_caption_model(repo: str, device: torch.device, hf_token: str | None = N
         from huggingface_hub import login
         login(hf_token, add_to_git_credential=True)
     cache_dir = CAPTION_CACHE_BASE / repo.replace("/", "_")
+    ensure_kosmos2_registered()
     processor = AutoProcessor.from_pretrained(
         repo,
         cache_dir=cache_dir,
@@ -675,7 +676,7 @@ def caption_once(
         **{
             "input_ids": inputs["input_ids"],
             "attention_mask": inputs.get("attention_mask"),
-            "pixel_values": inputs["pixel_values"],
+            pixel_key: inputs[pixel_key],
         },
         max_new_tokens=max_new_tokens,
         do_sample=temperature > 0,
