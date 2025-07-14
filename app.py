@@ -51,21 +51,63 @@ from transformers import (
     AutoProcessor,
 )
 from transformers.models.auto.configuration_auto import CONFIG_MAPPING
-from transformers.models.kosmos2 import Kosmos2VisionConfig, Kosmos2TextConfig
-from transformers.models.blip_2 import Blip2VisionConfig, Blip2QFormerConfig
-from transformers.models.instructblip import (
-    InstructBlipVisionConfig,
-    InstructBlipQFormerConfig,
-)
+try:
+    from transformers.models.kosmos2 import (
+        Kosmos2VisionConfig,
+        Kosmos2TextConfig,
+    )
+except Exception:  # pragma: no cover - older Transformers
+    Kosmos2VisionConfig = None
+    Kosmos2TextConfig = None
+
+try:
+    from transformers.models.blip_2 import (
+        Blip2VisionConfig,
+        Blip2QFormerConfig,
+    )
+except Exception:  # pragma: no cover - older Transformers
+    Blip2VisionConfig = None
+    Blip2QFormerConfig = None
+
+try:
+    from transformers.models.instructblip import (
+        InstructBlipVisionConfig,
+        InstructBlipQFormerConfig,
+    )
+except Exception:  # pragma: no cover - older Transformers
+    InstructBlipVisionConfig = None
+    InstructBlipQFormerConfig = None
 
 # Register missing vision/q-former configs for older Transformers versions
 try:
-    CONFIG_MAPPING.register("kosmos_2_vision_model", Kosmos2VisionConfig, exist_ok=True)
-    CONFIG_MAPPING.register("kosmos_2_text_model", Kosmos2TextConfig, exist_ok=True)
-    CONFIG_MAPPING.register("blip_2_vision_model", Blip2VisionConfig, exist_ok=True)
-    CONFIG_MAPPING.register("blip_2_qformer_model", Blip2QFormerConfig, exist_ok=True)
-    CONFIG_MAPPING.register("instructblip_vision_model", InstructBlipVisionConfig, exist_ok=True)
-    CONFIG_MAPPING.register("instructblip_qformer_model", InstructBlipQFormerConfig, exist_ok=True)
+    if Kosmos2VisionConfig:
+        CONFIG_MAPPING.register(
+            "kosmos_2_vision_model", Kosmos2VisionConfig, exist_ok=True
+        )
+    if Kosmos2TextConfig:
+        CONFIG_MAPPING.register(
+            "kosmos_2_text_model", Kosmos2TextConfig, exist_ok=True
+        )
+    if Blip2VisionConfig:
+        CONFIG_MAPPING.register(
+            "blip_2_vision_model", Blip2VisionConfig, exist_ok=True
+        )
+    if Blip2QFormerConfig:
+        CONFIG_MAPPING.register(
+            "blip_2_qformer_model", Blip2QFormerConfig, exist_ok=True
+        )
+    if InstructBlipVisionConfig:
+        CONFIG_MAPPING.register(
+            "instructblip_vision_model",
+            InstructBlipVisionConfig,
+            exist_ok=True,
+        )
+    if InstructBlipQFormerConfig:
+        CONFIG_MAPPING.register(
+            "instructblip_qformer_model",
+            InstructBlipQFormerConfig,
+            exist_ok=True,
+        )
 except Exception:
     pass
 import json, math
