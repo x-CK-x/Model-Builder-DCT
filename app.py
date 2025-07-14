@@ -362,7 +362,7 @@ def caption_once(
         tokenize=False,
         add_generation_prompt=True,
     )
-    inputs = processor(convo_str, images=img, return_tensors="pt")
+    inputs = processor(text=[convo_str], images=[img], return_tensors="pt")
     inputs = {k: v.to(device) for k, v in inputs.items()}
     inputs["pixel_values"] = inputs["pixel_values"].to(torch.bfloat16)
     out = model.generate(
@@ -377,7 +377,7 @@ def caption_once(
         top_p=top_p if temperature > 0 else None,
         use_cache=True,
     )
-    return processor.batch_decode(out[:, inputs["input_ids"].shape[-1]:])[0].strip()
+    return processor.batch_decode(out[:, chat_inputs["input_ids"].shape[-1]:])[0].strip()
 
 
 def caption_single(img: Image.Image, caption_type: str, caption_length: str | int,
