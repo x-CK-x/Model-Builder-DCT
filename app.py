@@ -220,13 +220,19 @@ def load_caption_model(repo: str, device: torch.device, hf_token: str | None = N
         from huggingface_hub import login
         login(hf_token, add_to_git_credential=True)
     cache_dir = CAPTION_CACHE_BASE / repo.replace("/", "_")
-    processor = AutoProcessor.from_pretrained(repo, cache_dir=cache_dir, token=hf_token or None)
+    processor = AutoProcessor.from_pretrained(
+        repo,
+        cache_dir=cache_dir,
+        token=hf_token or None,
+        trust_remote_code=True,
+    )
     model = LlavaForConditionalGeneration.from_pretrained(
         repo,
         torch_dtype=torch.bfloat16,
         device_map={"": device.index if device.type == "cuda" else "cpu"},
         cache_dir=cache_dir,
         token=hf_token or None,
+        trust_remote_code=True,
     )
     model.processor = processor
     model.eval()
@@ -334,7 +340,11 @@ def caption_once(img: Image.Image, prompt: str, temperature: float, top_p: float
                  repo: str = CAPTION_REPO, hf_token: str | None = None) -> str:
     model = load_caption_model(repo, device, hf_token)
     processor = model.processor
-    image_token = getattr(processor, "image_token", "<image>")
+    image_token = getattr(processor, "image_token", None)
+    if image_token is None and hasattr(processor, "tokenizer"):
+        image_token = getattr(processor.tokenizer, "image_token", None)
+    if image_token is None:
+        image_token = "<image>"
     convo = [
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": f"{image_token}\n{prompt.strip()}"},
