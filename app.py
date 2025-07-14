@@ -49,6 +49,7 @@ from transformers import (
     LlavaForConditionalGeneration,
     TextIteratorStreamer,
     AutoProcessor,
+    PretrainedConfig,
 )
 from transformers.models.auto.configuration_auto import CONFIG_MAPPING
 try:
@@ -57,8 +58,17 @@ try:
         Kosmos2TextConfig,
     )
 except Exception:  # pragma: no cover - older Transformers
-    Kosmos2VisionConfig = None
-    Kosmos2TextConfig = None
+    class Kosmos2VisionConfig(PretrainedConfig):
+        model_type = "kosmos_2_vision_model"
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+
+    class Kosmos2TextConfig(PretrainedConfig):
+        model_type = "kosmos_2_text_model"
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
 
 try:
     from transformers.models.blip_2 import (
@@ -66,8 +76,17 @@ try:
         Blip2QFormerConfig,
     )
 except Exception:  # pragma: no cover - older Transformers
-    Blip2VisionConfig = None
-    Blip2QFormerConfig = None
+    class Blip2VisionConfig(PretrainedConfig):
+        model_type = "blip_2_vision_model"
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+
+    class Blip2QFormerConfig(PretrainedConfig):
+        model_type = "blip_2_qformer_model"
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
 
 try:
     from transformers.models.instructblip import (
@@ -75,8 +94,17 @@ try:
         InstructBlipQFormerConfig,
     )
 except Exception:  # pragma: no cover - older Transformers
-    InstructBlipVisionConfig = None
-    InstructBlipQFormerConfig = None
+    class InstructBlipVisionConfig(PretrainedConfig):
+        model_type = "instructblip_vision_model"
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+
+    class InstructBlipQFormerConfig(PretrainedConfig):
+        model_type = "instructblip_qformer_model"
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
 
 # Register missing vision/q-former configs for older Transformers versions
 try:
