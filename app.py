@@ -201,15 +201,22 @@ def ensure_kosmos2_registered() -> None:
             from huggingface_hub import hf_hub_download, EntryNotFoundError
             import importlib.util
 
-            try:
-                mod_path = hf_hub_download(
-                    "microsoft/kosmos-2-patch14-224", "modeling_kosmos2.py"
-                )
-            except EntryNotFoundError:
-                mod_path = hf_hub_download(
-                    "microsoft/kosmos-2-patch14-224",
-                    "kosmos2/modeling_kosmos2.py",
-                )
+            mod_path = None
+            for name in (
+                "modeling_kosmos2.py",
+                "kosmos2/modeling_kosmos2.py",
+                "src/kosmos2/modeling_kosmos2.py",
+            ):
+                try:
+                    mod_path = hf_hub_download(
+                        "microsoft/kosmos-2-patch14-224", name
+                    )
+                    break
+                except EntryNotFoundError:
+                    continue
+
+            if mod_path is None:
+                raise RuntimeError("modeling_kosmos2.py not found in repo")
 
             spec = importlib.util.spec_from_file_location(
                 "modeling_kosmos2", mod_path
@@ -565,28 +572,37 @@ def caption_once(
         except Exception:
             convo_str = f"{image_token}\n{prompt.strip()}"
     inputs = processor(images=img, text=convo_str, return_tensors="pt")
-    inputs = {
-        k: v.to(device) if hasattr(v, "to") else v
-        for k, v in inputs.items()
-    }
+    inputs = {k: v.to(device) if hasattr(v, "to") else v for k, v in inputs.items()}
 
-    pixel_key = None
+    image_tensor = None
     for k in ("pixel_values", "image", "images"):
-        if k in inputs:
-            pixel_key = k
+        if k in inputs and isinstance(inputs[k], torch.Tensor):
+            image_tensor = inputs[k]
             break
 
-    if pixel_key is None:
-        # fall back to the first tensor with image-like dimensions
-        for k, v in inputs.items():
-            if isinstance(v, torch.Tensor) and v.ndim >= 3:
-                pixel_key = k
+    if image_tensor is None:
+        for k in ("pixel_values", "image", "images"):
+            if hasattr(inputs, k) and isinstance(getattr(inputs, k), torch.Tensor):
+                image_tensor = getattr(inputs, k)
                 break
 
-    if pixel_key is None:
+    if image_tensor is None:
+        for v in inputs.values():
+            if isinstance(v, torch.Tensor) and v.ndim >= 3:
+                image_tensor = v
+                break
+
+    if image_tensor is None:
+        for attr in dir(inputs):
+            val = getattr(inputs, attr, None)
+            if isinstance(val, torch.Tensor) and val.ndim >= 3:
+                image_tensor = val
+                break
+
+    if image_tensor is None:
         raise KeyError("No image tensor found in processor output")
 
-    inputs[pixel_key] = inputs[pixel_key].to(torch.bfloat16)
+    inputs["pixel_values"] = image_tensor.to(torch.bfloat16)
 
     out = model.generate(
         **{
