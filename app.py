@@ -334,9 +334,10 @@ def caption_once(img: Image.Image, prompt: str, temperature: float, top_p: float
                  repo: str = CAPTION_REPO, hf_token: str | None = None) -> str:
     model = load_caption_model(repo, device, hf_token)
     processor = model.processor
+    image_token = getattr(processor, "image_token", "<image>")
     convo = [
         {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": prompt.strip()},
+        {"role": "user", "content": f"{image_token}\n{prompt.strip()}"},
     ]
     convo_str = processor.apply_chat_template(convo, tokenize=False, add_generation_prompt=True)
     inputs = processor(text=[convo_str], images=[img], return_tensors="pt").to(device)
