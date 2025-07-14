@@ -63,6 +63,16 @@ CFG = load_config()
 CFG_CLASSIFY = CFG.get("classifier", {})
 CFG_CAPTION = CFG.get("captioner", {})
 
+# Approximate VRAM usage (GB) for available classifier models
+CLASSIFIER_VRAM = {
+    "pilot2": 6,
+    "pilot1": 6,
+    "z3d_convnext": 8,
+    "eva02_clip_7704": 5,
+    "eva02_vit_8046": 5,
+    "efficientnetv2_m_8035": 5,
+}
+
 # ╭───────────────────────── Device helpers ─────────────────────────╮
 def cuda_devices() -> list[str]:
     if not torch.cuda.is_available():
@@ -156,11 +166,27 @@ def _find_repo_tags_file(repo: str, subfolder: str | None) -> str | None:
     return candidates[0] if candidates else None
 
 # ────────────── Caption model setup ──────────────
-CAPTION_REPO = "fancyfeast/llama-joycaption-beta-one-hf-llava"
-CAPTION_CACHE = Path.home() / ".cache" / "joycaption"
-CAPTION_CACHE.mkdir(parents=True, exist_ok=True)
+# Available Vision–Language models (VLMs) with approximate VRAM needs (GB)
+CAPTION_MODELS = {
+    "JoyCaptioner": {"repo": "fancyfeast/llama-joycaption-beta-one-hf-llava", "vram": 14},
+    "LLaVA-1.5": {"repo": "llava-hf/llava-1.5-7b-hf", "vram": 14},
+    "Qwen-VL": {"repo": "Qwen/Qwen-VL", "vram": 16},
+    "BLIP2": {"repo": "Salesforce/blip2-flan-t5-xl", "vram": 22},
+    "InstructBLIP": {"repo": "Salesforce/instructblip-vicuna-7b", "vram": 16},
+    "MiniGPT-4": {"repo": "Vision-CAIR/minigpt4-vicuna-7b", "vram": 16},
+    "Kosmos-2": {"repo": "microsoft/kosmos-2-patch14-224", "vram": 12},
+    "OpenFlamingo": {"repo": "openflamingo/OpenFlamingo-9B-vitl-mpt7b", "vram": 18},
+}
 
-_caption_cache: dict[str, LlavaForConditionalGeneration] = {}
+DEFAULT_CAPTION_MODEL = "JoyCaptioner"
+CAPTION_MODEL = CFG_CAPTION.get("model", DEFAULT_CAPTION_MODEL)
+CAPTION_TOKEN = CFG_CAPTION.get("hf_token", "")
+CAPTION_REPO = CAPTION_MODELS.get(CAPTION_MODEL, CAPTION_MODELS[DEFAULT_CAPTION_MODEL])["repo"]
+
+CAPTION_CACHE_BASE = Path.home() / ".cache" / "caption_models"
+CAPTION_CACHE_BASE.mkdir(parents=True, exist_ok=True)
+
+_caption_cache: dict[tuple[str, str], LlavaForConditionalGeneration] = {}
 
 def unload_classification_models() -> None:
     """Remove all classification models from cache and clear VRAM."""
@@ -184,16 +210,29 @@ def unload_caption_models() -> None:
     torch.cuda.empty_cache()
     gc.collect()
 
-def load_caption_model(device: torch.device) -> LlavaForConditionalGeneration:
-    key = str(device)
+def load_caption_model(repo: str, device: torch.device, hf_token: str | None = None) -> LlavaForConditionalGeneration:
+    key = (repo, str(device))
     if key in _caption_cache:
         return _caption_cache[key]
-    processor = AutoProcessor.from_pretrained(CAPTION_REPO, cache_dir=CAPTION_CACHE)
+    # unload any previously cached models so only one caption model stays in memory
+    unload_caption_models()
+    if hf_token:
+        from huggingface_hub import login
+        login(hf_token, add_to_git_credential=True)
+    cache_dir = CAPTION_CACHE_BASE / repo.replace("/", "_")
+    processor = AutoProcessor.from_pretrained(
+        repo,
+        cache_dir=cache_dir,
+        token=hf_token or None,
+        trust_remote_code=True,
+    )
     model = LlavaForConditionalGeneration.from_pretrained(
-        CAPTION_REPO,
+        repo,
         torch_dtype=torch.bfloat16,
         device_map={"": device.index if device.type == "cuda" else "cpu"},
-        cache_dir=CAPTION_CACHE,
+        cache_dir=cache_dir,
+        token=hf_token or None,
+        trust_remote_code=True,
     )
     model.processor = processor
     model.eval()
@@ -282,18 +321,56 @@ def build_prompt(caption_type: str, caption_length: str | int, extra_options: li
 def toggle_name_box(selected_options: list[str]):
     return gr.update(visible=NAME_OPTION in selected_options)
 
-def caption_once(img: Image.Image, prompt: str, temperature: float, top_p: float, max_new_tokens: int, device: torch.device) -> str:
-    model = load_caption_model(device)
+def update_classify_vram(models: list[str]):
+    total = sum(CLASSIFIER_VRAM.get(m, 0) for m in models)
+    msg = f"Estimated VRAM required: ~{total} GB"
+    if total > 24:
+        msg += " – enable multiple GPUs"
+    return gr.update(value=msg)
+
+def update_caption_vram(model: str):
+    info = CAPTION_MODELS.get(model, {})
+    vram = info.get("vram", 0)
+    msg = f"Estimated VRAM required: ~{vram} GB"
+    if vram > 24:
+        msg += " – enable multiple GPUs"
+    return gr.update(value=msg)
+
+def caption_once(
+    img: Image.Image,
+    prompt: str,
+    temperature: float,
+    top_p: float,
+    max_new_tokens: int,
+    device: torch.device,
+    repo: str = CAPTION_REPO,
+    hf_token: str | None = None,
+) -> str:
+    model = load_caption_model(repo, device, hf_token)
     processor = model.processor
+    image_token = getattr(processor, "image_token", None)
+    if image_token is None and hasattr(processor, "tokenizer"):
+        image_token = getattr(processor.tokenizer, "image_token", None)
+    if image_token is None:
+        image_token = "<image>"
     convo = [
         {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": prompt.strip()},
+        {"role": "user", "content": f"{image_token}\n{prompt.strip()}"},
     ]
-    convo_str = processor.apply_chat_template(convo, tokenize=False, add_generation_prompt=True)
-    inputs = processor(text=[convo_str], images=[img], return_tensors="pt").to(device)
+    convo_str = processor.apply_chat_template(
+        convo,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    inputs = processor(convo_str, images=img, return_tensors="pt")
+    inputs = {k: v.to(device) for k, v in inputs.items()}
     inputs["pixel_values"] = inputs["pixel_values"].to(torch.bfloat16)
     out = model.generate(
-        **inputs,
+        **{
+            "input_ids": inputs["input_ids"],
+            "attention_mask": inputs.get("attention_mask"),
+            "pixel_values": inputs["pixel_values"],
+        },
         max_new_tokens=max_new_tokens,
         do_sample=temperature > 0,
         temperature=temperature if temperature > 0 else None,
@@ -306,13 +383,16 @@ def caption_once(img: Image.Image, prompt: str, temperature: float, top_p: float
 def caption_single(img: Image.Image, caption_type: str, caption_length: str | int,
                    extra_opts: list[str], name_field: str,
                    temperature: float, top_p: float, max_new_tokens: int,
-                   devices: list[str]):
+                   devices: list[str],
+                   repo: str = CAPTION_REPO,
+                   hf_token: str | None = None):
     if img is None:
         return ""
     unload_classification_models()
     device = _pick_device(devices)
     prompt = build_prompt(caption_type, caption_length, extra_opts, name_field)
-    return caption_once(img, prompt, temperature, top_p, max_new_tokens, device)
+    return caption_once(img, prompt, temperature, top_p, max_new_tokens,
+                        device, repo=repo, hf_token=hf_token)
 
 def local_path(spec: dict, fname: str, key: str) -> Path:
     sub = spec.get("subfolder", "") or key
@@ -1170,6 +1250,8 @@ def _pick_device(devices: list[str]) -> torch.device:
 
 def batch_caption(folder, caption_type, caption_length, extra_opts, name_field,
                   temperature, top_p, max_new_tokens, devices,
+                  repo: str = CAPTION_REPO,
+                  hf_token: str | None = None,
                   progress=gr.Progress(track_tqdm=True)):
     if not folder:
         yield "❌ No folder provided."; return
@@ -1192,14 +1274,15 @@ def batch_caption(folder, caption_type, caption_length, extra_opts, name_field,
     for i, p in enumerate(imgs, 1):
         img = Image.open(p).convert("RGB")
         prompt = build_prompt(caption_type, caption_length, extra_opts, name_field)
-        caption = caption_once(img, prompt, temperature, top_p, max_new_tokens, device)
+        caption = caption_once(img, prompt, temperature, top_p, max_new_tokens, device,
+                               repo=repo, hf_token=hf_token)
         (out_dir / f"{p.stem}.txt").write_text(caption, encoding="utf-8")
         eta = (time.time() - start) / i * (total - i)
         yield f"{i}/{total} done – ETA {int(eta)//60:02d}:{int(eta)%60:02d}"
 
     yield f"✅ Finished {total} images → {out_dir}"
 
-def caption_single_wrapper(img, ctype, clen, opts, name, temp, top_p, max_tok, dev):
+def caption_single_wrapper(img, ctype, clen, opts, name, temp, top_p, max_tok, dev, model, token):
     update_config(
         "captioner",
         type=ctype,
@@ -1208,11 +1291,15 @@ def caption_single_wrapper(img, ctype, clen, opts, name, temp, top_p, max_tok, d
         top_p=top_p,
         max_new_tokens=max_tok,
         devices=dev,
+        model=model,
+        hf_token=token,
     )
-    return caption_single(img, ctype, clen, opts, name, temp, top_p, max_tok, dev)
+    repo_id = CAPTION_MODELS.get(model, {}).get("repo", model)
+    return caption_single(img, ctype, clen, opts, name, temp, top_p, max_tok, dev,
+                          repo=repo_id, hf_token=token)
 
 
-def batch_caption_wrapper(folder, ctype, clen, opts, name, temp, top_p, max_tok, dev):
+def batch_caption_wrapper(folder, ctype, clen, opts, name, temp, top_p, max_tok, dev, model, token):
     update_config(
         "captioner",
         type=ctype,
@@ -1221,8 +1308,12 @@ def batch_caption_wrapper(folder, ctype, clen, opts, name, temp, top_p, max_tok,
         top_p=top_p,
         max_new_tokens=max_tok,
         devices=dev,
+        model=model,
+        hf_token=token,
     )
-    yield from batch_caption(folder, ctype, clen, opts, name, temp, top_p, max_tok, dev)
+    repo_id = CAPTION_MODELS.get(model, {}).get("repo", model)
+    yield from batch_caption(folder, ctype, clen, opts, name, temp, top_p, max_tok, dev,
+                             repo=repo_id, hf_token=token)
 
 CSS = """
 .inferno-slider input[type=range]{background:linear-gradient(to right,#000004,#1b0c41,#4a0c6b,#781c6d,#a52c60,#cf4446,#ed6925,#fb9b06,#f7d13d,#fcffa4)!important}
@@ -1244,6 +1335,15 @@ with demo:
         multiselect=True,
         label="Models to run"
     )
+    _default_models = CFG_CLASSIFY.get("models", ["pilot2"])
+    if isinstance(_default_models, str):
+        _default_models = [_default_models]
+    _default_vram = sum(CLASSIFIER_VRAM.get(m, 0) for m in _default_models)
+    _msg = f"Estimated VRAM required: ~{_default_vram} GB"
+    if _default_vram > 24:
+        _msg += " – enable multiple GPUs"
+    class_vram = gr.Markdown(value=_msg)
+    model_menu.change(update_classify_vram, model_menu, class_vram)
 
     # ─── Single-image tab
     with gr.Tab("Single Image"):
@@ -1287,6 +1387,22 @@ with demo:
 
     # ─── Captioner tab
     with gr.Tab("Captioner"):
+        cap_model = gr.Dropdown(
+            choices=list(CAPTION_MODELS.keys()),
+            value=CAPTION_MODEL,
+            label="Caption Model")
+        cap_v = CAPTION_MODELS.get(CAPTION_MODEL, {})
+        _cap_msg = f"Estimated VRAM required: ~{cap_v.get('vram', 0)} GB"
+        if cap_v.get('vram', 0) > 24:
+            _cap_msg += " – enable multiple GPUs"
+        cap_vram = gr.Markdown(value=_cap_msg)
+        cap_model.change(update_caption_vram, cap_model, cap_vram)
+        cap_token = gr.Textbox(
+            label="HF token (optional)",
+            type="password",
+            value=CAPTION_TOKEN,
+        )
+
         with gr.Tab("Single"):
             cap_image = gr.Image(type="pil", label="Input Image")
             cap_type = gr.Dropdown(
@@ -1322,7 +1438,9 @@ with demo:
             cap_out = gr.Textbox(label="Caption")
             cap_btn.click(
                 caption_single_wrapper,
-                inputs=[cap_image, cap_type, cap_len, cap_opts, name_box, temp_slider, top_p_slider, max_tok_slider, cap_devices],
+                inputs=[cap_image, cap_type, cap_len, cap_opts, name_box,
+                        temp_slider, top_p_slider, max_tok_slider, cap_devices,
+                        cap_model, cap_token],
                 outputs=cap_out,
             )
 
@@ -1336,7 +1454,9 @@ with demo:
                 label="Compute devices")
             cap_batch_btn.click(
                 batch_caption_wrapper,
-                inputs=[cap_folder, cap_type, cap_len, cap_opts, name_box, temp_slider, top_p_slider, max_tok_slider, cap_devices_b],
+                inputs=[cap_folder, cap_type, cap_len, cap_opts, name_box,
+                        temp_slider, top_p_slider, max_tok_slider, cap_devices_b,
+                        cap_model, cap_token],
                 outputs=cap_progress,
             )
 
