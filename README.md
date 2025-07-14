@@ -86,3 +86,12 @@ When you select a different caption model in the UI, the previous model is
 unloaded automatically. If you still hit CUDA out-of-memory errors after
 switching models, the new model likely requires more VRAM than is available on a
 single GPU—enable multiple GPUs in the interface or choose a smaller model.
+If Kosmos‑2 fails to load with a `KeyError` mentioning `kosmos_2_vision_model`,
+update the `transformers` library or use the latest code which patches the
+missing configuration automatically.
+If your Transformers install lacks the Kosmos‑2 model classes, the code will try
+to download them from Hugging Face. When network access is blocked or the
+download fails, a clear runtime error is raised asking you to enable network
+access or upgrade `transformers`.
+If Qwen‑VL reports a missing `tiktoken` module, install the optional
+`tiktoken` package.
