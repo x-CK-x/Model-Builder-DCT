@@ -90,7 +90,8 @@ If Kosmos‑2 fails to load with a `KeyError` mentioning `kosmos_2_vision_model`
 update the `transformers` library or use the latest code which patches the
 missing configuration automatically.
 If your Transformers install lacks the Kosmos‑2 model classes, the code will try
-to download them from Hugging Face. Make sure network access is available or
-upgrade `transformers` instead.
+to download them from Hugging Face. When network access is blocked or the
+download fails, a clear runtime error is raised asking you to enable network
+access or upgrade `transformers`.
 If Qwen‑VL reports a missing `tiktoken` module, install the optional
 `tiktoken` package.

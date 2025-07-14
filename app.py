@@ -210,8 +210,10 @@ def ensure_kosmos2_registered() -> None:
                 spec.loader.exec_module(mod)
                 Kosmos2VisionModel = getattr(mod, "Kosmos2VisionModel", None)
                 Kosmos2TextModel = getattr(mod, "Kosmos2TextModel", None)
-            except Exception:
-                return
+            except Exception as e:
+                raise RuntimeError(
+                    "Kosmos-2 model classes are unavailable. Update transformers or enable network access to download them."
+                ) from e
     try:
         AutoModel.register(
             Kosmos2VisionConfig, Kosmos2VisionModel, exist_ok=True
