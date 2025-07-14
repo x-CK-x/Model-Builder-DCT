@@ -383,7 +383,7 @@ def caption_once(
         top_p=top_p if temperature > 0 else None,
         use_cache=True,
     )
-    return processor.batch_decode(out[:, inputs["input_ids"].shape[-1]:])[0].strip()
+    return processor.batch_decode(out[:, chat_inputs["input_ids"].shape[-1]:])[0].strip()
 
 
 def caption_single(img: Image.Image, caption_type: str, caption_length: str | int,
