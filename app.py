@@ -394,8 +394,8 @@ def load_caption_model(repo: str, device: torch.device, hf_token: str | None = N
         return _caption_cache[key]
     # unload any previously cached models so only one caption model stays in memory
     unload_caption_models()
-    if "kosmos-2" in repo.lower():
-        ensure_kosmos2_registered()
+    # Register Kosmos-2 classes in case the captioning model depends on them
+    ensure_kosmos2_registered()
     if hf_token:
         from huggingface_hub import login
         login(hf_token, add_to_git_credential=True)
@@ -565,13 +565,23 @@ def caption_once(
         except Exception:
             convo_str = f"{image_token}\n{prompt.strip()}"
     inputs = processor(images=img, text=convo_str, return_tensors="pt")
-    inputs = {k: v.to(device) if hasattr(v, "to") else v for k, v in inputs.items()}
+    inputs = {
+        k: v.to(device) if hasattr(v, "to") else v
+        for k, v in inputs.items()
+    }
 
     pixel_key = None
     for k in ("pixel_values", "image", "images"):
         if k in inputs:
             pixel_key = k
             break
+
+    if pixel_key is None:
+        # fall back to the first tensor with image-like dimensions
+        for k, v in inputs.items():
+            if isinstance(v, torch.Tensor) and v.ndim >= 3:
+                pixel_key = k
+                break
 
     if pixel_key is None:
         raise KeyError("No image tensor found in processor output")
