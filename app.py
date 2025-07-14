@@ -139,6 +139,10 @@ try:
         )
 except Exception:
     pass
+Blip2VisionModel = None
+Blip2QFormerModel = None
+InstructBlipVisionModel = None
+InstructBlipQFormerModel = None
 try:
     from transformers.models.kosmos2 import (
         Kosmos2VisionModel,
@@ -235,6 +239,56 @@ def ensure_kosmos2_registered() -> None:
             AutoModel.register(Kosmos2TextConfig, Kosmos2TextModel, exist_ok=True)
     except Exception:
         pass
+
+
+def ensure_blip_registered() -> None:
+    """Register BLIP vision tower models if missing."""
+    global Blip2VisionModel, Blip2QFormerModel
+    global InstructBlipVisionModel, InstructBlipQFormerModel
+
+    try:
+        from transformers.models.blip_2 import (
+            Blip2VisionModel as BV,
+            Blip2QFormerModel as BQ,
+        )
+        Blip2VisionModel, Blip2QFormerModel = BV, BQ
+    except Exception:
+        Blip2VisionModel = Blip2QFormerModel = None
+
+    try:
+        from transformers.models.instructblip import (
+            InstructBlipVisionModel as IBV,
+            InstructBlipQFormerModel as IBQ,
+        )
+        InstructBlipVisionModel, InstructBlipQFormerModel = IBV, IBQ
+    except Exception:
+        InstructBlipVisionModel = InstructBlipQFormerModel = None
+
+    try:
+        if Blip2VisionConfig and Blip2VisionModel:
+            AutoModel.register(Blip2VisionConfig, Blip2VisionModel, exist_ok=True)
+        if Blip2QFormerConfig and Blip2QFormerModel:
+            AutoModel.register(Blip2QFormerConfig, Blip2QFormerModel, exist_ok=True)
+        if InstructBlipVisionConfig and InstructBlipVisionModel:
+            AutoModel.register(
+                InstructBlipVisionConfig,
+                InstructBlipVisionModel,
+                exist_ok=True,
+            )
+        if InstructBlipQFormerConfig and InstructBlipQFormerModel:
+            AutoModel.register(
+                InstructBlipQFormerConfig,
+                InstructBlipQFormerModel,
+                exist_ok=True,
+            )
+    except Exception:
+        pass
+
+
+def ensure_caption_dependencies() -> None:
+    """Ensure optional caption model classes are registered."""
+    ensure_kosmos2_registered()
+    ensure_blip_registered()
 import json, math
 from user_config import load_config, update_config
 from openrouter_tab import add_openrouter_tab
@@ -401,8 +455,8 @@ def load_caption_model(repo: str, device: torch.device, hf_token: str | None = N
         return _caption_cache[key]
     # unload any previously cached models so only one caption model stays in memory
     unload_caption_models()
-    # Register Kosmos-2 classes in case the captioning model depends on them
-    ensure_kosmos2_registered()
+    # Register optional model classes (Kosmos-2, BLIP variants, etc.)
+    ensure_caption_dependencies()
     if hf_token:
         from huggingface_hub import login
         login(hf_token, add_to_git_credential=True)
@@ -414,14 +468,28 @@ def load_caption_model(repo: str, device: torch.device, hf_token: str | None = N
         token=hf_token or None,
         trust_remote_code=True,
     )
-    model = LlavaForConditionalGeneration.from_pretrained(
-        repo,
-        torch_dtype=torch.bfloat16,
-        device_map={"": device.index if device.type == "cuda" else "cpu"},
-        cache_dir=cache_dir,
-        token=hf_token or None,
-        trust_remote_code=True,
-    )
+    try:
+        model = LlavaForConditionalGeneration.from_pretrained(
+            repo,
+            torch_dtype=torch.bfloat16,
+            device_map={"": device.index if device.type == "cuda" else "cpu"},
+            cache_dir=cache_dir,
+            token=hf_token or None,
+            trust_remote_code=True,
+        )
+    except ValueError as e:
+        if "Unrecognized configuration class" in str(e):
+            ensure_caption_dependencies()
+            model = LlavaForConditionalGeneration.from_pretrained(
+                repo,
+                torch_dtype=torch.bfloat16,
+                device_map={"": device.index if device.type == "cuda" else "cpu"},
+                cache_dir=cache_dir,
+                token=hf_token or None,
+                trust_remote_code=True,
+            )
+        else:
+            raise
     model.processor = processor
     model.eval()
     _caption_cache[key] = model
