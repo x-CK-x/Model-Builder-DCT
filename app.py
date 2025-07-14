@@ -52,6 +52,7 @@ from transformers import (
     PretrainedConfig,
 )
 from transformers.models.auto.configuration_auto import CONFIG_MAPPING
+from transformers.models.auto.modeling_auto import AutoModel
 try:
     from transformers.models.kosmos2 import (
         Kosmos2VisionConfig,
@@ -135,6 +136,26 @@ try:
             "instructblip_qformer_model",
             InstructBlipQFormerConfig,
             exist_ok=True,
+        )
+except Exception:
+    pass
+try:
+    from transformers.models.kosmos2 import (
+        Kosmos2VisionModel,
+        Kosmos2TextModel,
+    )
+except Exception:
+    Kosmos2VisionModel = None
+    Kosmos2TextModel = None
+
+try:
+    if Kosmos2VisionConfig and Kosmos2VisionModel:
+        AutoModel.register(
+            Kosmos2VisionConfig, Kosmos2VisionModel, exist_ok=True
+        )
+    if Kosmos2TextConfig and Kosmos2TextModel:
+        AutoModel.register(
+            Kosmos2TextConfig, Kosmos2TextModel, exist_ok=True
         )
 except Exception:
     pass
