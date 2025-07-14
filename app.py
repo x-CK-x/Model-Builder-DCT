@@ -148,12 +148,20 @@ except Exception:
     Kosmos2VisionModel = None
     Kosmos2TextModel = None
     try:
-        from huggingface_hub import hf_hub_download
-        import importlib.util, sys
+        from huggingface_hub import hf_hub_download, EntryNotFoundError
+        import importlib.util
 
-        mod_path = hf_hub_download(
-            "microsoft/kosmos-2-patch14-224", "modeling_kosmos2.py"
-        )
+        try:
+            mod_path = hf_hub_download(
+                "microsoft/kosmos-2-patch14-224", "modeling_kosmos2.py"
+            )
+        except EntryNotFoundError:
+            # some repos store the file inside a subfolder
+            mod_path = hf_hub_download(
+                "microsoft/kosmos-2-patch14-224",
+                "kosmos2/modeling_kosmos2.py",
+            )
+
         spec = importlib.util.spec_from_file_location(
             "modeling_kosmos2", mod_path
         )
@@ -175,6 +183,51 @@ try:
         )
 except Exception:
     pass
+
+
+def ensure_kosmos2_registered() -> None:
+    """Attempt to import or download Kosmos-2 model classes and register them."""
+    global Kosmos2VisionModel, Kosmos2TextModel
+    if Kosmos2VisionModel and Kosmos2TextModel:
+        return
+    try:
+        from transformers.models.kosmos2 import (
+            Kosmos2VisionModel as KV,
+            Kosmos2TextModel as KT,
+        )
+        Kosmos2VisionModel, Kosmos2TextModel = KV, KT
+    except Exception:
+        try:
+            from huggingface_hub import hf_hub_download, EntryNotFoundError
+            import importlib.util
+
+            try:
+                mod_path = hf_hub_download(
+                    "microsoft/kosmos-2-patch14-224", "modeling_kosmos2.py"
+                )
+            except EntryNotFoundError:
+                mod_path = hf_hub_download(
+                    "microsoft/kosmos-2-patch14-224",
+                    "kosmos2/modeling_kosmos2.py",
+                )
+
+            spec = importlib.util.spec_from_file_location(
+                "modeling_kosmos2", mod_path
+            )
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            Kosmos2VisionModel = getattr(mod, "Kosmos2VisionModel", None)
+            Kosmos2TextModel = getattr(mod, "Kosmos2TextModel", None)
+        except Exception:
+            Kosmos2VisionModel, Kosmos2TextModel = None, None
+
+    try:
+        if Kosmos2VisionConfig and Kosmos2VisionModel:
+            AutoModel.register(Kosmos2VisionConfig, Kosmos2VisionModel, exist_ok=True)
+        if Kosmos2TextConfig and Kosmos2TextModel:
+            AutoModel.register(Kosmos2TextConfig, Kosmos2TextModel, exist_ok=True)
+    except Exception:
+        pass
 import json, math
 from user_config import load_config, update_config
 from openrouter_tab import add_openrouter_tab
@@ -341,6 +394,8 @@ def load_caption_model(repo: str, device: torch.device, hf_token: str | None = N
         return _caption_cache[key]
     # unload any previously cached models so only one caption model stays in memory
     unload_caption_models()
+    if "kosmos-2" in repo.lower():
+        ensure_kosmos2_registered()
     if hf_token:
         from huggingface_hub import login
         login(hf_token, add_to_git_credential=True)
@@ -509,13 +564,24 @@ def caption_once(
         except Exception:
             convo_str = f"{image_token}\n{prompt.strip()}"
     inputs = processor(images=img, text=convo_str, return_tensors="pt")
-    inputs = {k: v.to(device) for k, v in inputs.items()}
-    inputs["pixel_values"] = inputs["pixel_values"].to(torch.bfloat16)
+    inputs = {k: v.to(device) if hasattr(v, "to") else v for k, v in inputs.items()}
+
+    pixel_key = None
+    for k in ("pixel_values", "image", "images"):
+        if k in inputs:
+            pixel_key = k
+            break
+
+    if pixel_key is None:
+        raise KeyError("No image tensor found in processor output")
+
+    inputs[pixel_key] = inputs[pixel_key].to(torch.bfloat16)
+
     out = model.generate(
         **{
             "input_ids": inputs["input_ids"],
             "attention_mask": inputs.get("attention_mask"),
-            "pixel_values": inputs["pixel_values"],
+            pixel_key: inputs[pixel_key],
         },
         max_new_tokens=max_new_tokens,
         do_sample=temperature > 0,
