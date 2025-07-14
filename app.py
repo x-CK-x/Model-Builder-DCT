@@ -336,8 +336,16 @@ def update_caption_vram(model: str):
         msg += " – enable multiple GPUs"
     return gr.update(value=msg)
 
-def caption_once(img: Image.Image, prompt: str, temperature: float, top_p: float, max_new_tokens: int, device: torch.device,
-                 repo: str = CAPTION_REPO, hf_token: str | None = None) -> str:
+def caption_once(
+    img: Image.Image,
+    prompt: str,
+    temperature: float,
+    top_p: float,
+    max_new_tokens: int,
+    device: torch.device,
+    repo: str = CAPTION_REPO,
+    hf_token: str | None = None,
+) -> str:
     model = load_caption_model(repo, device, hf_token)
     processor = model.processor
     image_token = getattr(processor, "image_token", None)
@@ -349,18 +357,25 @@ def caption_once(img: Image.Image, prompt: str, temperature: float, top_p: float
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": f"{image_token}\n{prompt.strip()}"},
     ]
-    convo_str = processor.apply_chat_template(convo, tokenize=False, add_generation_prompt=True)
-    inputs = processor(text=[convo_str], images=[img], return_tensors="pt").to(device)
-    inputs["pixel_values"] = inputs["pixel_values"].to(torch.bfloat16)
+    chat_inputs = processor.apply_chat_template(
+        convo,
+        add_generation_prompt=True,
+        return_tensors="pt",
+    )
+    chat_inputs = {k: v.to(device) for k, v in chat_inputs.items()}
+    pixel_values = processor(images=[img], return_tensors="pt")["pixel_values"].to(device)
+    pixel_values = pixel_values.to(torch.bfloat16)
     out = model.generate(
-        **inputs,
+        input_ids=chat_inputs["input_ids"],
+        attention_mask=chat_inputs.get("attention_mask"),
+        pixel_values=pixel_values,
         max_new_tokens=max_new_tokens,
         do_sample=temperature > 0,
         temperature=temperature if temperature > 0 else None,
         top_p=top_p if temperature > 0 else None,
         use_cache=True,
     )
-    return processor.batch_decode(out[:, inputs["input_ids"].shape[-1]:])[0].strip()
+    return processor.batch_decode(out[:, chat_inputs["input_ids"].shape[-1]:])[0].strip()
 
 
 def caption_single(img: Image.Image, caption_type: str, caption_length: str | int,
