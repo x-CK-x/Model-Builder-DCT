@@ -1349,19 +1349,20 @@ with demo:
     with gr.Tab("Single Image"):
         with gr.Row():
             with gr.Column():
-                with gr.Tab("Original"):
-                    img_orig = gr.Image(         # new — shows uploaded image untouched
-                        sources=["upload", "clipboard"],
-                        type="pil",
-                        label="Source",
-                        elem_id="image_container",
-                    )
-                with gr.Tab("Grad-CAM"):
-                    img_cam = gr.Image(          # new — shows heat-map overlay
-                        type="pil",
-                        label="CAM",
-                        elem_id="image_container",
-                    )
+                with gr.Accordion("Input Image", open=True):
+                    with gr.Tab("Original"):
+                        img_orig = gr.Image(         # new — shows uploaded image untouched
+                            sources=["upload", "clipboard"],
+                            type="pil",
+                            label="Source",
+                            elem_id="image_container",
+                        )
+                    with gr.Tab("Grad-CAM"):
+                        img_cam = gr.Image(          # new — shows heat-map overlay
+                            type="pil",
+                            label="CAM",
+                            elem_id="image_container",
+                        )
                 cam_thr  = gr.Slider(0, 1, 0.4, 0.01, label="CAM threshold",
                                      elem_classes="inferno-slider")#.4
                 cam_alpha= gr.Slider(0, 1, 0.6, 0.01, label="CAM alpha")#.6
@@ -1404,7 +1405,8 @@ with demo:
         )
 
         with gr.Tab("Single"):
-            cap_image = gr.Image(type="pil", label="Input Image")
+            with gr.Accordion("Input Image", open=True):
+                cap_image = gr.Image(type="pil", label="Input Image")
             cap_type = gr.Dropdown(
                 choices=list(CAPTION_TYPE_MAP.keys()),
                 value=CFG_CAPTION.get("type", "Descriptive"),
