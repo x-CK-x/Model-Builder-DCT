@@ -147,6 +147,22 @@ try:
 except Exception:
     Kosmos2VisionModel = None
     Kosmos2TextModel = None
+    try:
+        from huggingface_hub import hf_hub_download
+        import importlib.util, sys
+
+        mod_path = hf_hub_download(
+            "microsoft/kosmos-2-patch14-224", "modeling_kosmos2.py"
+        )
+        spec = importlib.util.spec_from_file_location(
+            "modeling_kosmos2", mod_path
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        Kosmos2VisionModel = getattr(mod, "Kosmos2VisionModel", None)
+        Kosmos2TextModel = getattr(mod, "Kosmos2TextModel", None)
+    except Exception:
+        pass
 
 try:
     if Kosmos2VisionConfig and Kosmos2VisionModel:

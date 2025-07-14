@@ -89,5 +89,8 @@ single GPU—enable multiple GPUs in the interface or choose a smaller model.
 If Kosmos‑2 fails to load with a `KeyError` mentioning `kosmos_2_vision_model`,
 update the `transformers` library or use the latest code which patches the
 missing configuration automatically.
+If your Transformers install lacks the Kosmos‑2 model classes, the code will try
+to download them from Hugging Face. Make sure network access is available or
+upgrade `transformers` instead.
 If Qwen‑VL reports a missing `tiktoken` module, install the optional
 `tiktoken` package.
