@@ -50,6 +50,24 @@ from transformers import (
     TextIteratorStreamer,
     AutoProcessor,
 )
+from transformers.models.auto.configuration_auto import CONFIG_MAPPING
+from transformers.models.kosmos2 import Kosmos2VisionConfig, Kosmos2TextConfig
+from transformers.models.blip_2 import Blip2VisionConfig, Blip2QFormerConfig
+from transformers.models.instructblip import (
+    InstructBlipVisionConfig,
+    InstructBlipQFormerConfig,
+)
+
+# Register missing vision/q-former configs for older Transformers versions
+try:
+    CONFIG_MAPPING.register("kosmos_2_vision_model", Kosmos2VisionConfig, exist_ok=True)
+    CONFIG_MAPPING.register("kosmos_2_text_model", Kosmos2TextConfig, exist_ok=True)
+    CONFIG_MAPPING.register("blip_2_vision_model", Blip2VisionConfig, exist_ok=True)
+    CONFIG_MAPPING.register("blip_2_qformer_model", Blip2QFormerConfig, exist_ok=True)
+    CONFIG_MAPPING.register("instructblip_vision_model", InstructBlipVisionConfig, exist_ok=True)
+    CONFIG_MAPPING.register("instructblip_qformer_model", InstructBlipQFormerConfig, exist_ok=True)
+except Exception:
+    pass
 import json, math
 from user_config import load_config, update_config
 from openrouter_tab import add_openrouter_tab
