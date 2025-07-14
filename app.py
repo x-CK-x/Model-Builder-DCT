@@ -400,6 +400,7 @@ def load_caption_model(repo: str, device: torch.device, hf_token: str | None = N
         from huggingface_hub import login
         login(hf_token, add_to_git_credential=True)
     cache_dir = CAPTION_CACHE_BASE / repo.replace("/", "_")
+    ensure_kosmos2_registered()
     processor = AutoProcessor.from_pretrained(
         repo,
         cache_dir=cache_dir,
