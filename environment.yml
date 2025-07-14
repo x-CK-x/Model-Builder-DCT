@@ -25,9 +25,9 @@ dependencies:
       - safetensors                       #==0.4.3
       - gradio
       - huggingface_hub
+      - tiktoken                      # Qwen tokenizer requirement
       - sentencepiece                    # some models need it
       - jinja2                           # chat-template rendering
-      - gradio
       - rich                             # nicer CLI logs (optional)
       - python-dotenv>=1.0        # convenience only – optional
       - onnxruntime
