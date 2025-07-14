@@ -175,6 +175,52 @@ try:
         )
 except Exception:
     pass
+
+
+def ensure_kosmos2_registered() -> None:
+    """Import and register Kosmos-2 model classes if missing."""
+    global Kosmos2VisionModel, Kosmos2TextModel
+    need_register = (
+        Kosmos2VisionConfig not in AutoModel._model_mapping
+        or Kosmos2VisionModel is None
+    )
+    if not need_register:
+        return
+    if Kosmos2VisionModel is None or Kosmos2TextModel is None:
+        try:
+            from transformers.models.kosmos2 import (
+                Kosmos2VisionModel as _KV,
+                Kosmos2TextModel as _KT,
+            )
+            Kosmos2VisionModel, Kosmos2TextModel = _KV, _KT
+        except Exception:
+            try:
+                from huggingface_hub import hf_hub_download
+                import importlib.util
+
+                mod_path = hf_hub_download(
+                    "microsoft/kosmos-2-patch14-224",
+                    "modeling_kosmos2.py",
+                )
+                spec = importlib.util.spec_from_file_location(
+                    "modeling_kosmos2",
+                    mod_path,
+                )
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                Kosmos2VisionModel = getattr(mod, "Kosmos2VisionModel", None)
+                Kosmos2TextModel = getattr(mod, "Kosmos2TextModel", None)
+            except Exception:
+                return
+    try:
+        AutoModel.register(
+            Kosmos2VisionConfig, Kosmos2VisionModel, exist_ok=True
+        )
+        AutoModel.register(
+            Kosmos2TextConfig, Kosmos2TextModel, exist_ok=True
+        )
+    except Exception:
+        pass
 import json, math
 from user_config import load_config, update_config
 from openrouter_tab import add_openrouter_tab
@@ -345,6 +391,7 @@ def load_caption_model(repo: str, device: torch.device, hf_token: str | None = N
         from huggingface_hub import login
         login(hf_token, add_to_git_credential=True)
     cache_dir = CAPTION_CACHE_BASE / repo.replace("/", "_")
+    ensure_kosmos2_registered()
     processor = AutoProcessor.from_pretrained(
         repo,
         cache_dir=cache_dir,
