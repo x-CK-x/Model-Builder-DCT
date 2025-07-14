@@ -139,6 +139,10 @@ try:
         )
 except Exception:
     pass
+Blip2VisionModel = None
+Blip2QFormerModel = None
+InstructBlipVisionModel = None
+InstructBlipQFormerModel = None
 try:
     from transformers.models.kosmos2 import (
         Kosmos2VisionModel,
@@ -148,12 +152,20 @@ except Exception:
     Kosmos2VisionModel = None
     Kosmos2TextModel = None
     try:
-        from huggingface_hub import hf_hub_download
-        import importlib.util, sys
+        from huggingface_hub import hf_hub_download, EntryNotFoundError
+        import importlib.util
 
-        mod_path = hf_hub_download(
-            "microsoft/kosmos-2-patch14-224", "modeling_kosmos2.py"
-        )
+        try:
+            mod_path = hf_hub_download(
+                "microsoft/kosmos-2-patch14-224", "modeling_kosmos2.py"
+            )
+        except EntryNotFoundError:
+            # some repos store the file inside a subfolder
+            mod_path = hf_hub_download(
+                "microsoft/kosmos-2-patch14-224",
+                "kosmos2/modeling_kosmos2.py",
+            )
+
         spec = importlib.util.spec_from_file_location(
             "modeling_kosmos2", mod_path
         )
@@ -175,6 +187,108 @@ try:
         )
 except Exception:
     pass
+
+
+def ensure_kosmos2_registered() -> None:
+    """Attempt to import or download Kosmos-2 model classes and register them."""
+    global Kosmos2VisionModel, Kosmos2TextModel
+    if Kosmos2VisionModel and Kosmos2TextModel:
+        return
+    try:
+        from transformers.models.kosmos2 import (
+            Kosmos2VisionModel as KV,
+            Kosmos2TextModel as KT,
+        )
+        Kosmos2VisionModel, Kosmos2TextModel = KV, KT
+    except Exception:
+        try:
+            from huggingface_hub import hf_hub_download, EntryNotFoundError
+            import importlib.util
+
+            mod_path = None
+            for name in (
+                "modeling_kosmos2.py",
+                "kosmos2/modeling_kosmos2.py",
+                "src/kosmos2/modeling_kosmos2.py",
+            ):
+                try:
+                    mod_path = hf_hub_download(
+                        "microsoft/kosmos-2-patch14-224", name
+                    )
+                    break
+                except EntryNotFoundError:
+                    continue
+
+            if mod_path is None:
+                raise RuntimeError("modeling_kosmos2.py not found in repo")
+
+            spec = importlib.util.spec_from_file_location(
+                "modeling_kosmos2", mod_path
+            )
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            Kosmos2VisionModel = getattr(mod, "Kosmos2VisionModel", None)
+            Kosmos2TextModel = getattr(mod, "Kosmos2TextModel", None)
+        except Exception:
+            Kosmos2VisionModel, Kosmos2TextModel = None, None
+
+    try:
+        if Kosmos2VisionConfig and Kosmos2VisionModel:
+            AutoModel.register(Kosmos2VisionConfig, Kosmos2VisionModel, exist_ok=True)
+        if Kosmos2TextConfig and Kosmos2TextModel:
+            AutoModel.register(Kosmos2TextConfig, Kosmos2TextModel, exist_ok=True)
+    except Exception:
+        pass
+
+
+def ensure_blip_registered() -> None:
+    """Register BLIP vision tower models if missing."""
+    global Blip2VisionModel, Blip2QFormerModel
+    global InstructBlipVisionModel, InstructBlipQFormerModel
+
+    try:
+        from transformers.models.blip_2 import (
+            Blip2VisionModel as BV,
+            Blip2QFormerModel as BQ,
+        )
+        Blip2VisionModel, Blip2QFormerModel = BV, BQ
+    except Exception:
+        Blip2VisionModel = Blip2QFormerModel = None
+
+    try:
+        from transformers.models.instructblip import (
+            InstructBlipVisionModel as IBV,
+            InstructBlipQFormerModel as IBQ,
+        )
+        InstructBlipVisionModel, InstructBlipQFormerModel = IBV, IBQ
+    except Exception:
+        InstructBlipVisionModel = InstructBlipQFormerModel = None
+
+    try:
+        if Blip2VisionConfig and Blip2VisionModel:
+            AutoModel.register(Blip2VisionConfig, Blip2VisionModel, exist_ok=True)
+        if Blip2QFormerConfig and Blip2QFormerModel:
+            AutoModel.register(Blip2QFormerConfig, Blip2QFormerModel, exist_ok=True)
+        if InstructBlipVisionConfig and InstructBlipVisionModel:
+            AutoModel.register(
+                InstructBlipVisionConfig,
+                InstructBlipVisionModel,
+                exist_ok=True,
+            )
+        if InstructBlipQFormerConfig and InstructBlipQFormerModel:
+            AutoModel.register(
+                InstructBlipQFormerConfig,
+                InstructBlipQFormerModel,
+                exist_ok=True,
+            )
+    except Exception:
+        pass
+
+
+def ensure_caption_dependencies() -> None:
+    """Ensure optional caption model classes are registered."""
+    ensure_kosmos2_registered()
+    ensure_blip_registered()
 import json, math
 from user_config import load_config, update_config
 from openrouter_tab import add_openrouter_tab
@@ -341,6 +455,8 @@ def load_caption_model(repo: str, device: torch.device, hf_token: str | None = N
         return _caption_cache[key]
     # unload any previously cached models so only one caption model stays in memory
     unload_caption_models()
+    # Register optional model classes (Kosmos-2, BLIP variants, etc.)
+    ensure_caption_dependencies()
     if hf_token:
         from huggingface_hub import login
         login(hf_token, add_to_git_credential=True)
@@ -351,14 +467,28 @@ def load_caption_model(repo: str, device: torch.device, hf_token: str | None = N
         token=hf_token or None,
         trust_remote_code=True,
     )
-    model = LlavaForConditionalGeneration.from_pretrained(
-        repo,
-        torch_dtype=torch.bfloat16,
-        device_map={"": device.index if device.type == "cuda" else "cpu"},
-        cache_dir=cache_dir,
-        token=hf_token or None,
-        trust_remote_code=True,
-    )
+    try:
+        model = LlavaForConditionalGeneration.from_pretrained(
+            repo,
+            torch_dtype=torch.bfloat16,
+            device_map={"": device.index if device.type == "cuda" else "cpu"},
+            cache_dir=cache_dir,
+            token=hf_token or None,
+            trust_remote_code=True,
+        )
+    except ValueError as e:
+        if "Unrecognized configuration class" in str(e):
+            ensure_caption_dependencies()
+            model = LlavaForConditionalGeneration.from_pretrained(
+                repo,
+                torch_dtype=torch.bfloat16,
+                device_map={"": device.index if device.type == "cuda" else "cpu"},
+                cache_dir=cache_dir,
+                token=hf_token or None,
+                trust_remote_code=True,
+            )
+        else:
+            raise
     model.processor = processor
     model.eval()
     _caption_cache[key] = model
@@ -509,8 +639,38 @@ def caption_once(
         except Exception:
             convo_str = f"{image_token}\n{prompt.strip()}"
     inputs = processor(images=img, text=convo_str, return_tensors="pt")
-    inputs = {k: v.to(device) for k, v in inputs.items()}
-    inputs["pixel_values"] = inputs["pixel_values"].to(torch.bfloat16)
+    inputs = {k: v.to(device) if hasattr(v, "to") else v for k, v in inputs.items()}
+
+    image_tensor = None
+    for k in ("pixel_values", "image", "images"):
+        if k in inputs and isinstance(inputs[k], torch.Tensor):
+            image_tensor = inputs[k]
+            break
+
+    if image_tensor is None:
+        for k in ("pixel_values", "image", "images"):
+            if hasattr(inputs, k) and isinstance(getattr(inputs, k), torch.Tensor):
+                image_tensor = getattr(inputs, k)
+                break
+
+    if image_tensor is None:
+        for v in inputs.values():
+            if isinstance(v, torch.Tensor) and v.ndim >= 3:
+                image_tensor = v
+                break
+
+    if image_tensor is None:
+        for attr in dir(inputs):
+            val = getattr(inputs, attr, None)
+            if isinstance(val, torch.Tensor) and val.ndim >= 3:
+                image_tensor = val
+                break
+
+    if image_tensor is None:
+        raise KeyError("No image tensor found in processor output")
+
+    inputs["pixel_values"] = image_tensor.to(torch.bfloat16)
+
     out = model.generate(
         **{
             "input_ids": inputs["input_ids"],
