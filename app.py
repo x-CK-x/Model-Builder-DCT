@@ -49,7 +49,116 @@ from transformers import (
     LlavaForConditionalGeneration,
     TextIteratorStreamer,
     AutoProcessor,
+    PretrainedConfig,
 )
+from transformers.models.auto.configuration_auto import CONFIG_MAPPING
+from transformers.models.auto.modeling_auto import AutoModel
+try:
+    from transformers.models.kosmos2 import (
+        Kosmos2VisionConfig,
+        Kosmos2TextConfig,
+    )
+except Exception:  # pragma: no cover - older Transformers
+    class Kosmos2VisionConfig(PretrainedConfig):
+        model_type = "kosmos_2_vision_model"
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+
+    class Kosmos2TextConfig(PretrainedConfig):
+        model_type = "kosmos_2_text_model"
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+
+try:
+    from transformers.models.blip_2 import (
+        Blip2VisionConfig,
+        Blip2QFormerConfig,
+    )
+except Exception:  # pragma: no cover - older Transformers
+    class Blip2VisionConfig(PretrainedConfig):
+        model_type = "blip_2_vision_model"
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+
+    class Blip2QFormerConfig(PretrainedConfig):
+        model_type = "blip_2_qformer_model"
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+
+try:
+    from transformers.models.instructblip import (
+        InstructBlipVisionConfig,
+        InstructBlipQFormerConfig,
+    )
+except Exception:  # pragma: no cover - older Transformers
+    class InstructBlipVisionConfig(PretrainedConfig):
+        model_type = "instructblip_vision_model"
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+
+    class InstructBlipQFormerConfig(PretrainedConfig):
+        model_type = "instructblip_qformer_model"
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+
+# Register missing vision/q-former configs for older Transformers versions
+try:
+    if Kosmos2VisionConfig:
+        CONFIG_MAPPING.register(
+            "kosmos_2_vision_model", Kosmos2VisionConfig, exist_ok=True
+        )
+    if Kosmos2TextConfig:
+        CONFIG_MAPPING.register(
+            "kosmos_2_text_model", Kosmos2TextConfig, exist_ok=True
+        )
+    if Blip2VisionConfig:
+        CONFIG_MAPPING.register(
+            "blip_2_vision_model", Blip2VisionConfig, exist_ok=True
+        )
+    if Blip2QFormerConfig:
+        CONFIG_MAPPING.register(
+            "blip_2_qformer_model", Blip2QFormerConfig, exist_ok=True
+        )
+    if InstructBlipVisionConfig:
+        CONFIG_MAPPING.register(
+            "instructblip_vision_model",
+            InstructBlipVisionConfig,
+            exist_ok=True,
+        )
+    if InstructBlipQFormerConfig:
+        CONFIG_MAPPING.register(
+            "instructblip_qformer_model",
+            InstructBlipQFormerConfig,
+            exist_ok=True,
+        )
+except Exception:
+    pass
+try:
+    from transformers.models.kosmos2 import (
+        Kosmos2VisionModel,
+        Kosmos2TextModel,
+    )
+except Exception:
+    Kosmos2VisionModel = None
+    Kosmos2TextModel = None
+
+try:
+    if Kosmos2VisionConfig and Kosmos2VisionModel:
+        AutoModel.register(
+            Kosmos2VisionConfig, Kosmos2VisionModel, exist_ok=True
+        )
+    if Kosmos2TextConfig and Kosmos2TextModel:
+        AutoModel.register(
+            Kosmos2TextConfig, Kosmos2TextModel, exist_ok=True
+        )
+except Exception:
+    pass
 import json, math
 from user_config import load_config, update_config
 from openrouter_tab import add_openrouter_tab
@@ -355,14 +464,35 @@ def caption_once(
         image_token = "<image>"
     convo = [
         {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": f"{image_token}\n{prompt.strip()}"},
+        {
+            "role": "user",
+            "content": [
+                {"type": "image"},
+                {"type": "text", "text": prompt.strip()},
+            ],
+        },
     ]
-    convo_str = processor.apply_chat_template(
-        convo,
-        tokenize=False,
-        add_generation_prompt=True,
-    )
-    inputs = processor(text=[convo_str], images=[img], return_tensors="pt")
+    try:
+        convo_str = processor.apply_chat_template(
+            convo,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+    except Exception:
+        # Fallback to string content for older templates
+        convo_fallback = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": f"{image_token}\n{prompt.strip()}"},
+        ]
+        try:
+            convo_str = processor.apply_chat_template(
+                convo_fallback,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        except Exception:
+            convo_str = f"{image_token}\n{prompt.strip()}"
+    inputs = processor(images=img, text=convo_str, return_tensors="pt")
     inputs = {k: v.to(device) for k, v in inputs.items()}
     inputs["pixel_values"] = inputs["pixel_values"].to(torch.bfloat16)
     out = model.generate(
@@ -377,7 +507,7 @@ def caption_once(
         top_p=top_p if temperature > 0 else None,
         use_cache=True,
     )
-    return processor.batch_decode(out[:, chat_inputs["input_ids"].shape[-1]:])[0].strip()
+    return processor.batch_decode(out[:, inputs["input_ids"].shape[-1]:])[0].strip()
 
 
 def caption_single(img: Image.Image, caption_type: str, caption_length: str | int,
@@ -1349,19 +1479,20 @@ with demo:
     with gr.Tab("Single Image"):
         with gr.Row():
             with gr.Column():
-                with gr.Tab("Original"):
-                    img_orig = gr.Image(         # new — shows uploaded image untouched
-                        sources=["upload", "clipboard"],
-                        type="pil",
-                        label="Source",
-                        elem_id="image_container",
-                    )
-                with gr.Tab("Grad-CAM"):
-                    img_cam = gr.Image(          # new — shows heat-map overlay
-                        type="pil",
-                        label="CAM",
-                        elem_id="image_container",
-                    )
+                with gr.Accordion("Input Image", open=True):
+                    with gr.Tab("Original"):
+                        img_orig = gr.Image(         # new — shows uploaded image untouched
+                            sources=["upload", "clipboard"],
+                            type="pil",
+                            label="Source",
+                            elem_id="image_container",
+                        )
+                    with gr.Tab("Grad-CAM"):
+                        img_cam = gr.Image(          # new — shows heat-map overlay
+                            type="pil",
+                            label="CAM",
+                            elem_id="image_container",
+                        )
                 cam_thr  = gr.Slider(0, 1, 0.4, 0.01, label="CAM threshold",
                                      elem_classes="inferno-slider")#.4
                 cam_alpha= gr.Slider(0, 1, 0.6, 0.01, label="CAM alpha")#.6
@@ -1404,7 +1535,8 @@ with demo:
         )
 
         with gr.Tab("Single"):
-            cap_image = gr.Image(type="pil", label="Input Image")
+            with gr.Accordion("Input Image", open=True):
+                cap_image = gr.Image(type="pil", label="Input Image")
             cap_type = gr.Dropdown(
                 choices=list(CAPTION_TYPE_MAP.keys()),
                 value=CFG_CAPTION.get("type", "Descriptive"),
