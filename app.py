@@ -355,14 +355,20 @@ def caption_once(
         image_token = "<image>"
     convo = [
         {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": f"{image_token}\n{prompt.strip()}"},
+        {
+            "role": "user",
+            "content": [
+                {"type": "image"},
+                {"type": "text", "text": prompt.strip()},
+            ],
+        },
     ]
     convo_str = processor.apply_chat_template(
         convo,
         tokenize=False,
         add_generation_prompt=True,
     )
-    inputs = processor(text=[convo_str], images=[img], return_tensors="pt")
+    inputs = processor(images=img, text=convo_str, return_tensors="pt")
     inputs = {k: v.to(device) for k, v in inputs.items()}
     inputs["pixel_values"] = inputs["pixel_values"].to(torch.bfloat16)
     out = model.generate(
