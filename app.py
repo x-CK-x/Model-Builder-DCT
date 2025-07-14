@@ -423,11 +423,26 @@ def caption_once(
             ],
         },
     ]
-    convo_str = processor.apply_chat_template(
-        convo,
-        tokenize=False,
-        add_generation_prompt=True,
-    )
+    try:
+        convo_str = processor.apply_chat_template(
+            convo,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+    except Exception:
+        # Fallback to string content for older templates
+        convo_fallback = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": f"{image_token}\n{prompt.strip()}"},
+        ]
+        try:
+            convo_str = processor.apply_chat_template(
+                convo_fallback,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        except Exception:
+            convo_str = f"{image_token}\n{prompt.strip()}"
     inputs = processor(images=img, text=convo_str, return_tensors="pt")
     inputs = {k: v.to(device) for k, v in inputs.items()}
     inputs["pixel_values"] = inputs["pixel_values"].to(torch.bfloat16)
