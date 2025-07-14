@@ -182,7 +182,8 @@ def add_openrouter_tab():
         prompt_in = gr.Textbox(label="Extra instructions for the LLM (optional)", lines=3, value=cfg.get("prompt_extra", ""))
         gr.Markdown("### Single Image")
         with gr.Row():
-            image_in = gr.Image(label="Image", type="filepath")
+            with gr.Accordion("Input Image", open=True):
+                image_in = gr.Image(label="Image", type="filepath")
             tag_file_in = gr.File(label="Tag File (.txt)", file_types=["text"], interactive=True)
         run_single_btn = gr.Button("Run (Single Image)", variant="primary")
         single_out = gr.Textbox(label="New Tag String", show_copy_button=True)
